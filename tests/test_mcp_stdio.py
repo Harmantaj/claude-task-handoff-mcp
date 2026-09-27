@@ -10,7 +10,7 @@ import sys
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-EXPECTED_TOOLS = {"start_task", "inspect_task_state", "run_relevant_checks", "verify_task", "summarize_handoff"}
+EXPECTED_TOOLS = {"start_task", "inspect_task_state", "run_relevant_checks", "verify_task", "summarize_handoff", "find_repos", "check_setup"}
 
 
 def _text(result) -> str:

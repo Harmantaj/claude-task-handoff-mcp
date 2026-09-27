@@ -45,6 +45,26 @@ _~/code/demo-shop · baseline 2026-09-27T22:57:08+0530 @ dc8811b592e9_
 Add or run tests covering shop/pricing.py. Then call verify_task again.
 ```
 
+## Quick start for Mac (2 minutes, no terminal)
+
+1. **Download:** [task-handoff.mcpb](https://github.com/Harmantaj/claude-task-handoff-mcp/releases/latest/download/task-handoff.mcpb)
+   (always the latest version).
+2. **Double-click it.** Claude Desktop opens an install dialog. Click **Install**.
+   If macOS or Claude warns that the extension is from an unverified developer, that's expected for
+   extensions shared outside Anthropic's directory.
+3. **Talk to Claude** in a new chat. You don't need to know any paths:
+   - *"Check my task-handoff setup."* confirms everything is ready and says exactly what to fix if not.
+   - *"Find my shop project and start a task-handoff baseline for 'add dark mode'."*
+   - *(after the work is done)* *"Verify the work in my shop project. Claims: dark mode toggle added in settings.tsx, all tests pass."*
+
+Requirements: Claude Desktop on macOS with Apple's Command Line Tools, which you already have if `git`
+works. If not, `check_setup` tells you to run `xcode-select --install`.
+The first time Claude looks in Documents, Desktop or Downloads, macOS may ask whether Claude can
+access that folder. Allow it if your projects live there.
+
+> Only works in the **Claude Desktop app** (it runs on your computer and checks your local code).
+> It can't be used from claude.ai in a browser or the mobile apps.
+
 ---
 
 ## Requirements
@@ -65,8 +85,8 @@ Add or run tests covering shop/pricing.py. Then call verify_task again.
 
 ### Option A: Claude Desktop (one click)
 
-1. Download **`task-handoff-<version>.mcpb`** from the
-   [latest release](https://github.com/Harmantaj/claude-task-handoff-mcp/releases/latest).
+1. Download **[task-handoff.mcpb](https://github.com/Harmantaj/claude-task-handoff-mcp/releases/latest/download/task-handoff.mcpb)**
+   (always the latest release).
 2. Double-click the file. Claude Desktop opens an install dialog. Alternatively, go to
    **Settings → Extensions**, then **Advanced settings → Install Extension…** and pick the file.
 3. Click **Install**.
@@ -104,7 +124,7 @@ Alternatively, `pip install git+https://github.com/Harmantaj/claude-task-handoff
 
 ## How to use it
 
-Always give the **absolute path** of the repository.
+Give the repository's **absolute path**, or just name the project and Claude will find it with `find_repos`.
 
 **1. Before the agent starts work**, ask:
 
@@ -141,6 +161,8 @@ with your claims and report its verdict verbatim. Do not claim success if it is 
 | `run_relevant_checks(repo_path, dry_run=false)` | yes | Run just the selected checks |
 | `verify_task(repo_path, claims=[], notes="")` | yes | Full verification plus claim cross-checking and the handoff report |
 | `summarize_handoff(repo_path)` | no | Re-show the last report without re-running; marks it `[STALE]` if the repo changed since |
+| `find_repos(query="")` | no | Find git repos on this computer (allowed directories or home folder), most recently active first, so people can name a project instead of giving a path |
+| `check_setup(repo_path="")` | no | Diagnose git, Python, node/npm, go, poetry, conda, plus the repo's interpreter and test dependencies, with exact fixes |
 
 All tools accept `format: "json"` for the full structured report.
 

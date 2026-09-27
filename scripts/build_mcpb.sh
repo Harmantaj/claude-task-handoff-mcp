@@ -15,3 +15,5 @@ cp LICENSE build/bundle/
 
 npx -y @anthropic-ai/mcpb@2 validate build/bundle/manifest.json
 npx -y @anthropic-ai/mcpb@2 pack build/bundle "dist/task-handoff-$version.mcpb"
+# Stable name for the permanent link releases/latest/download/task-handoff.mcpb
+cp "dist/task-handoff-$version.mcpb" dist/task-handoff.mcpb

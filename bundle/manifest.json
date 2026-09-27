@@ -3,32 +3,74 @@
   "manifest_version": "0.3",
   "name": "task-handoff",
   "display_name": "Task Handoff Verifier",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Independently verify an AI agent's work in a local git repo and get a compact, evidence-labelled handoff.",
   "long_description": "Task Handoff inspects what actually changed in a local git repository, runs only the checks relevant to those changes (syntax, lint, typecheck, targeted tests, build, Playwright when configured), cross-checks the agent's claims, and returns a short report where every statement is labelled VERIFIED, CLAIMED, INFERRED, NOT TESTED or BLOCKED. It never installs packages, never commits, pushes, resets or deletes. Note: verification runs the project's own tests and build scripts. Requires git and Python 3.9+ on PATH; macOS and Linux.",
-  "author": { "name": "Harmantaj", "url": "https://github.com/Harmantaj" },
-  "repository": { "type": "git", "url": "https://github.com/Harmantaj/claude-task-handoff-mcp" },
+  "author": {
+    "name": "Harmantaj",
+    "url": "https://github.com/Harmantaj"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Harmantaj/claude-task-handoff-mcp"
+  },
   "homepage": "https://github.com/Harmantaj/claude-task-handoff-mcp",
   "documentation": "https://github.com/Harmantaj/claude-task-handoff-mcp#readme",
   "support": "https://github.com/Harmantaj/claude-task-handoff-mcp/issues",
   "license": "MIT",
-  "keywords": ["verification", "git", "testing", "handoff", "code review", "playwright"],
+  "keywords": [
+    "verification",
+    "git",
+    "testing",
+    "handoff",
+    "code review",
+    "playwright"
+  ],
   "icon": "icon.png",
   "server": {
     "type": "python",
     "entry_point": "server/main.py",
     "mcp_config": {
       "command": "python3",
-      "args": ["${__dirname}/server/main.py", "${user_config.allowed_directories}"],
-      "env": { "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1" }
+      "args": [
+        "${__dirname}/server/main.py",
+        "${user_config.allowed_directories}"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      }
     }
   },
   "tools": [
-    { "name": "start_task", "description": "Record a baseline before work starts so pre-existing edits are not attributed to the task." },
-    { "name": "inspect_task_state", "description": "Read-only: attributed changes, impact categories, risk flags, and the checks that would run." },
-    { "name": "run_relevant_checks", "description": "Run the cheapest meaningful checks for the changed files." },
-    { "name": "verify_task", "description": "Full verification with claim cross-checking; returns the handoff and a next prompt." },
-    { "name": "summarize_handoff", "description": "Return the last report without re-running checks (flags it if stale)." }
+    {
+      "name": "start_task",
+      "description": "Record a baseline before work starts so pre-existing edits are not attributed to the task."
+    },
+    {
+      "name": "inspect_task_state",
+      "description": "Read-only: attributed changes, impact categories, risk flags, and the checks that would run."
+    },
+    {
+      "name": "run_relevant_checks",
+      "description": "Run the cheapest meaningful checks for the changed files."
+    },
+    {
+      "name": "verify_task",
+      "description": "Full verification with claim cross-checking; returns the handoff and a next prompt."
+    },
+    {
+      "name": "summarize_handoff",
+      "description": "Return the last report without re-running checks (flags it if stale)."
+    },
+    {
+      "name": "find_repos",
+      "description": "Find git repositories on this computer so you can refer to projects by name."
+    },
+    {
+      "name": "check_setup",
+      "description": "Diagnose missing tools or test dependencies and get exact fixes."
+    }
   ],
   "user_config": {
     "allowed_directories": {
@@ -40,7 +82,12 @@
     }
   },
   "compatibility": {
-    "platforms": ["darwin", "linux"],
-    "runtimes": { "python": ">=3.9" }
+    "platforms": [
+      "darwin",
+      "linux"
+    ],
+    "runtimes": {
+      "python": ">=3.9"
+    }
   }
 }
