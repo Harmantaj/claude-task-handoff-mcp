@@ -1,0 +1,13 @@
+{
+  "verification": {
+    "max_parallel_checks": 3,
+    "timeout_seconds": 120
+  },
+  "playwright": {
+    "enabled": true,
+    "install_automatically": false
+  },
+  "safety": {
+    "allow_destructive_operations": false
+  }
+}
