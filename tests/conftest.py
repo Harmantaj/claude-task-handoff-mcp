@@ -5,6 +5,14 @@ from pathlib import Path
 import pytest
 
 
+def make_python(path: Path) -> Path:
+    """Create an executable that behaves like an environment's python (delegates to the test runner's)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!/bin/sh\nexec '{sys.executable}' \"$@\"\n")
+    path.chmod(0o755)
+    return path
+
+
 class Repo:
     def __init__(self, root: Path):
         self.root = root
@@ -40,11 +48,7 @@ def repo(tmp_path: Path) -> Repo:
 @pytest.fixture
 def py_repo(repo: Repo) -> Repo:
     """Python project whose interpreter (the test runner's) has pytest available."""
-    venv_bin = repo.root / ".venv" / "bin"
-    venv_bin.mkdir(parents=True)
-    wrapper = venv_bin / "python"
-    wrapper.write_text(f"#!/bin/sh\nexec '{sys.executable}' \"$@\"\n")
-    wrapper.chmod(0o755)
+    make_python(repo.root / ".venv" / "bin" / "python")
     repo.write("pyproject.toml", "[project]\nname='fx'\nversion='0'\n\n[tool.pytest.ini_options]\n")
     repo.write("app/__init__.py", "")
     repo.write("app/calc.py", "def add(a, b):\n    return a + b\n")

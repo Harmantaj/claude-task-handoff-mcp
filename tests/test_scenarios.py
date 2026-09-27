@@ -171,7 +171,7 @@ def test_dependency_change_runs_full_suite_and_flags_risk(py_repo):
     gitstate.record_baseline(py_repo.root, "t")
     py_repo.write("requirements.txt", "requests==2.32.0\n")
     report = build_report(str(py_repo.root))
-    assert by_id(report, "pytest")["reason"] == "dependencies changed"
+    assert by_id(report, "pytest")["reason"].startswith("dependencies changed")
     assert any(r.startswith("Dependencies changed") for r in report["risks"])
 
 

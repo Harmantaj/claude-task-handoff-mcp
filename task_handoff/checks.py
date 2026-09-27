@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 
 from .gitstate import FileChange
 from .impact import language
+from .pyenvs import find_python
 
 KIND_STRENGTH = {"syntax": 1, "lint": 2, "typecheck": 2, "build": 2, "test": 3, "browser": 3}
 
@@ -47,13 +48,6 @@ def _exists_any(root: Path, names: list[str]) -> Path | None:
 
 
 # --------------------------------------------------------------------------- python
-
-
-def _python_for(root: Path) -> str | None:
-    venv = _exists_any(root, [".venv/bin/python", "venv/bin/python", "env/bin/python"])
-    if venv:
-        return str(venv)
-    return shutil.which("python3") or shutil.which("python")
 
 
 def _has_module(python: str, module: str) -> bool:
@@ -92,17 +86,18 @@ def _python_checks(root: Path, changes: list[FileChange], all_files: list[str], 
     if not py_changed and not deps_changed:
         return []
 
-    python = _python_for(root)
+    python, source = find_python(root)
     checks: list[Check] = []
     if python is None:
         return [Check("python-syntax", "syntax", [], str(root), "Python files changed", py_changed,
                       blocked_reason="no python interpreter found on PATH")]
+    via = f" · python: {source}"
 
     if py_changed:
         checks.append(Check(
             "python-syntax", "syntax",
             [python, "-c", "import ast,sys\nfor f in sys.argv[1:]: ast.parse(open(f,'rb').read(), f)", *py_changed],
-            str(root), f"{len(py_changed)} Python file(s) changed (read-only parse)", py_changed,
+            str(root), f"{len(py_changed)} Python file(s) changed (read-only parse){via}", py_changed,
         ))
 
     py_all = [f for f in all_files if f.endswith(".py")]
@@ -126,18 +121,18 @@ def _python_checks(root: Path, changes: list[FileChange], all_files: list[str], 
 
         argv_base = [python, "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider"]
         full_needed = deps_changed or conftest_changed or (unmapped and config["verification"]["full_suite_fallback"])
-        blocked = None if _has_module(python, "pytest") else f"pytest is not installed for {python}"
+        blocked = None if _has_module(python, "pytest") else f"pytest is not installed for {python} ({source})"
         if full_needed and test_files:
             why = (
                 "dependencies changed" if deps_changed else
                 "conftest.py changed" if conftest_changed else
                 f"no targeted tests found for {len(unmapped)} changed file(s); running full suite as fallback"
             )
-            checks.append(Check("pytest", "test", argv_base, str(root), why, py_changed, scope="full",
+            checks.append(Check("pytest", "test", argv_base, str(root), why + via, py_changed, scope="full",
                                 runner="pytest", blocked_reason=blocked))
         elif targets:
             checks.append(Check("pytest", "test", [*argv_base, *sorted(targets)], str(root),
-                                f"tests mapped to changed files ({len(targets)} test file(s))",
+                                f"tests mapped to changed files ({len(targets)} test file(s)){via}",
                                 sorted(covered), runner="pytest", blocked_reason=blocked))
         elif not test_files and py_changed:
             checks.append(Check("pytest", "test", [], str(root), "pytest configured", py_changed,
@@ -149,7 +144,7 @@ def _python_checks(root: Path, changes: list[FileChange], all_files: list[str], 
                             "ruff is configured", py_changed,
                             blocked_reason=None if ruff else "ruff configured but not installed"))
     if py_changed and (_exists_any(root, ["mypy.ini", ".mypy.ini"]) or _pyproject_has(root, "tool.mypy")):
-        blocked = None if _has_module(python, "mypy") else "mypy configured but not installed"
+        blocked = None if _has_module(python, "mypy") else f"mypy configured but not installed for {python} ({source})"
         checks.append(Check("mypy", "typecheck", [python, "-m", "mypy", "--no-incremental", *py_changed],
                             str(root), "mypy is configured", py_changed, blocked_reason=blocked))
     return checks

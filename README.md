@@ -155,7 +155,7 @@ Only checks relevant to the changed files run. The full test suite is never run 
 
 | Changed | Checks |
 |---|---|
-| Python | read-only syntax parse; pytest on tests matched by name (`foo.py` to `test_foo.py`). Full suite only if dependencies or `conftest.py` changed, or nothing matched (labelled as a fallback). ruff and mypy if configured. |
+| Python (interpreter: in-repo venv → Poetry env → conda env → `python3`) | read-only syntax parse; pytest on tests matched by name (`foo.py` to `test_foo.py`). Full suite only if dependencies or `conftest.py` changed, or nothing matched (labelled as a fallback). ruff and mypy if configured. |
 | JS/TS (nearest `package.json`) | `typecheck` script or `tsc --noEmit`, `lint`, `vitest related` / `jest --findRelatedTests` when possible, else `test`; `build` only when dependencies or config changed |
 | Go | `go vet` and `go test` on the changed packages |
 | Shell scripts | `bash -n` (parse only), plus `shellcheck` if installed |
@@ -195,11 +195,11 @@ Put a `.task-handoff.json` in the repository root:
 
 | Symptom | Fix |
 |---|---|
-| `pytest is not installed for /usr/bin/python3` (BLOCKED) | The tool uses the repo's `.venv/` or `venv/` interpreter if present, otherwise `python3` on PATH. Create an in-repo venv with your dev dependencies. Poetry, conda and pyenv environments outside the repo are not detected yet. |
+| `pytest is not installed for … (python3 on PATH)` (BLOCKED) | The tool looks for the project's interpreter in this order: an in-repo `.venv/`/`venv/`; the **Poetry** env (via `poetry env info`, or Poetry's cache dir if `poetry` isn't on PATH; honours `POETRY_VIRTUALENVS_PATH`/`POETRY_CACHE_DIR`); the **conda** env named in `environment.yml` (via `prefix:`, `~/.conda/environments.txt`, or the usual miniconda/anaconda/miniforge/mambaforge/micromamba `envs/` dirs); then `python3` on PATH. The check's `why` shows which one was used. Create the env (e.g. `poetry install`, `conda env create`) with your test dependencies. pyenv/hatch/pdm envs outside the repo are not detected. |
 | `dependencies not installed (no node_modules …)` | Run `npm install` (or pnpm/yarn) yourself. The tool never installs. |
 | `timed out after 120s` | Raise `verification.timeout_seconds` in `.task-handoff.json` |
 | `npm is not installed` in Claude Desktop but it works in a terminal | GUI apps get a minimal PATH. The server adds `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, `~/.cargo/bin`, `~/go/bin`, `~/.bun/bin` and `~/.volta/bin`; tools installed elsewhere (e.g. via nvm) may not be found. |
-| Extension shows an error in Claude Desktop | Check the MCP logs in `~/Library/Logs/Claude/` (`mcp.log` and any `mcp-server-*.log`). A healthy start logs `[task-handoff] v0.1.0 starting; python 3.x`. The most common cause is no `python3` on the system: install the Xcode Command Line Tools (`xcode-select --install`). |
+| Extension shows an error in Claude Desktop | Check the MCP logs in `~/Library/Logs/Claude/` (`mcp.log` and any `mcp-server-*.log`). A healthy start logs `[task-handoff] v0.x.y starting; python 3.x`. The most common cause is no `python3` on the system: install the Xcode Command Line Tools (`xcode-select --install`). |
 | Everything is attributed to the task | No baseline was recorded. Call `start_task` before the work begins. |
 
 ---
