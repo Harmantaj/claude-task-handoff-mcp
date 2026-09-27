@@ -13,11 +13,15 @@ import sys
 from pathlib import Path
 
 from . import __version__, gitstate
+from .discovery import check_setup as _check_setup
+from .discovery import find_repos as _find_repos
 from .handoff import build_report, load_report, render_markdown
 from .protocol import StdioServer, Tool, ToolError
 
 INSTRUCTIONS = """\
 Independent verification of coding work in a local git repository (pass an absolute repo_path).
+If the user names a project instead of giving a path, call find_repos to locate it (confirm if
+several match). If something doesn't work, call check_setup and relay its fixes.
 Workflow: call start_task before modifying code (records a baseline so pre-existing
 uncommitted changes are not attributed to the task), then verify_task when done. Report the
 verdict honestly: FAILED/BLOCKED/NOT TESTED items are not successes. Every finding is
@@ -113,6 +117,28 @@ def summarize_handoff(repo_path: str, format: str = "markdown") -> str:
     return prefix + render_markdown(fresh)
 
 
+def find_repos(query: str = "", limit: int = 20) -> str:
+    roots = ALLOWED_ROOTS or [Path.home()]
+    result = _find_repos(roots, query=query, limit=max(1, min(int(limit), 50)))
+    if not result["repos"]:
+        where = ", ".join(result["searched"])
+        hint = f" matching '{query}'" if query else ""
+        return (f"No git repositories{hint} found under {where} (searched {result['total_found']} repos, "
+                f"depth <= 4, skipping hidden folders and Library). Ask the user for the full path.")
+    lines = [f"Found {result['matched']} repo(s)" + (f" matching '{query}'" if query else "")
+             + f" (showing {len(result['repos'])}, most recently active first):"]
+    for r in result["repos"]:
+        dirty = "?" if r["uncommitted_files"] is None else r["uncommitted_files"]
+        lines.append(f"- `{r['path']}` · branch {r['branch']} · {dirty} uncommitted file(s) · active {r['last_activity']}")
+    if result["search_truncated"]:
+        lines.append("(search stopped at the time limit; results may be incomplete - pass a query to narrow it)")
+    return "\n".join(lines)
+
+
+def check_setup(repo_path: str = "") -> str:
+    return _check_setup(ALLOWED_ROOTS, repo_path or None)
+
+
 REPO = {"type": "string", "description": "Absolute path to (a directory inside) the git repository."}
 FORMAT = {"type": "string", "enum": ["markdown", "json"], "default": "markdown",
           "description": "markdown (compact handoff) or json (full structured report)."}
@@ -163,6 +189,24 @@ def build_server() -> StdioServer:
         "report is marked stale and a fresh inspection-only report is returned.",
         {"type": "object", "properties": {"repo_path": REPO, "format": FORMAT}, "required": ["repo_path"]},
         summarize_handoff, {"title": "Summarize handoff", "readOnlyHint": True},
+    ))
+    server.tool(Tool(
+        "find_repos",
+        "Find git repositories on this computer (inside the allowed directories, or the home folder), most recently "
+        "active first. Use it when the user names a project ('my shop app') instead of giving a path.",
+        {"type": "object", "properties": {
+            "query": {"type": "string", "description": "Case-insensitive part of the repo path, e.g. 'shop'. Empty lists all."},
+            "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 50}}},
+        find_repos, {"title": "Find repositories", "readOnlyHint": True},
+    ))
+    server.tool(Tool(
+        "check_setup",
+        "Diagnose the local setup: git, Python, node/npm, go, poetry, conda and other tools the checks use, plus "
+        "(given repo_path) which interpreter that repo's checks would use and whether its test deps are installed. "
+        "Returns exact fixes for anything missing.",
+        {"type": "object", "properties": {"repo_path": {"type": "string",
+         "description": "Optional repository to diagnose."}}},
+        check_setup, {"title": "Check setup", "readOnlyHint": True},
     ))
     return server
 

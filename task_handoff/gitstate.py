@@ -22,14 +22,29 @@ class GitError(RuntimeError):
     pass
 
 
+class GitMissing(GitError):
+    pass
+
+
+GIT_INSTALL_HINT = ("git is not available. On macOS run `xcode-select --install` (Apple's Command Line Tools, "
+                    "which include git and python3); on Linux install git with your package manager.")
+# macOS ships /usr/bin/git as a stub that fails like this until the Command Line Tools are installed.
+XCRUN_MISSING = ("invalid active developer path", "xcrun: error", "No developer tools were found")
+
+
 def git(root: Path, *args: str, check: bool = True) -> str:
-    proc = subprocess.run(
-        ["git", "-C", str(root), *args],
-        capture_output=True,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        errors="replace",
-    )
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            errors="replace",
+        )
+    except FileNotFoundError as exc:
+        raise GitMissing(GIT_INSTALL_HINT) from exc
+    if proc.returncode != 0 and any(marker in proc.stderr for marker in XCRUN_MISSING):
+        raise GitMissing(GIT_INSTALL_HINT)
     if check and proc.returncode != 0:
         raise GitError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
     return proc.stdout
@@ -41,6 +56,8 @@ def repo_root(path: str | Path) -> Path:
         raise GitError(f"Path does not exist: {path}")
     try:
         return Path(git(path, "rev-parse", "--show-toplevel").strip())
+    except GitMissing:
+        raise
     except GitError as exc:
         raise GitError(f"Not inside a git repository: {path}") from exc
 
