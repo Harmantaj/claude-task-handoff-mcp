@@ -1,0 +1,23 @@
+[project]
+name = "claude-task-handoff-mcp"
+version = "0.1.0"
+description = "MCP server that independently verifies a coding agent's work and produces a compact, evidence-labelled handoff."
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "mcp>=1.2; python_version >= '3.10'"]
+
+[project.scripts]
+task-handoff-mcp = "task_handoff.server:main"
+task-handoff = "task_handoff.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["task_handoff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
