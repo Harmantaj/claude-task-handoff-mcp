@@ -3,6 +3,7 @@
   task-handoff start  <repo> "<task>"
   task-handoff inspect <repo> [--json]
   task-handoff verify  <repo> [--claim TEXT ...] [--json]
+  task-handoff hook session-start|stop   (Claude Code hooks; payload JSON on stdin)
 Exit status of `verify`: 0 VERIFIED/NO CHANGES/NO EXECUTABLE CHANGES, 1 FAILED, 2 otherwise.
 """
 
@@ -23,7 +24,16 @@ def main(argv: list[str] | None = None) -> int:
     i = sub.add_parser("inspect"); i.add_argument("repo"); i.add_argument("--json", action="store_true")
     v = sub.add_parser("verify"); v.add_argument("repo"); v.add_argument("--claim", action="append", default=[])
     v.add_argument("--json", action="store_true")
+    h = sub.add_parser("hook"); h.add_argument("event", choices=["session-start", "stop"])
     args = parser.parse_args(argv)
+
+    if args.cmd == "hook":
+        from .hooks import run as run_hook
+
+        out, code = run_hook(args.event, sys.stdin.read())
+        if out:
+            print(out)
+        return code
 
     try:
         if args.cmd == "start":

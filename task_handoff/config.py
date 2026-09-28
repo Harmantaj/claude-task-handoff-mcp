@@ -23,6 +23,13 @@ DEFAULTS: dict[str, Any] = {
     },
     "safety": {"allow_destructive_operations": False},
     "report": {"max_files_listed": 25, "max_output_lines": 12},
+    # Claude Code hook mode (task-handoff hook session-start|stop)
+    "hooks": {
+        "enabled": True,
+        "block_on_failure": True,  # send Claude back once to fix a FAILED verification
+        "timeout_seconds": 120,  # per check, in hook mode
+        "full_suite_fallback": False,  # hooks run targeted checks only
+    },
 }
 
 CONFIG_FILENAME = ".task-handoff.json"
@@ -38,11 +45,13 @@ def _merge(base: dict, override: dict) -> dict:
     return out
 
 
-def load_config(repo_root: Path) -> dict[str, Any]:
+def load_config(repo_root: Path, overrides: dict | None = None) -> dict[str, Any]:
     config = copy.deepcopy(DEFAULTS)
     for candidate in (os.environ.get("TASK_HANDOFF_CONFIG"), repo_root / CONFIG_FILENAME):
         if candidate and Path(candidate).is_file():
             config = _merge(config, json.loads(Path(candidate).read_text()))
+    if overrides:
+        config = _merge(config, overrides)
     # Installing browsers/deps and destructive operations are never performed,
     # regardless of configuration.
     config["playwright"]["install_automatically"] = False

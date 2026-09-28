@@ -102,9 +102,10 @@ def fingerprint(root: Path, path: str) -> str:
 # --------------------------------------------------------------------------- baseline
 
 
-def record_baseline(root: Path, task: str) -> dict:
+def record_baseline(root: Path, task: str, session_id: str = "") -> dict:
     baseline = {
         "task": task,
+        "session_id": session_id,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "head": head(root),
         "dirty": {p: fingerprint(root, p) for p in dirty_files(root)},
