@@ -60,7 +60,8 @@ def find_repos(roots: list[Path], query: str = "", limit: int = 20) -> dict:
                 continue
         return 0.0
 
-    matches.sort(key=last_activity, reverse=True)
+    activity = {repo: last_activity(repo) for repo in matches}  # measured once, before any git command runs
+    matches.sort(key=activity.__getitem__, reverse=True)
     repos = []
     for repo in matches[:limit]:
         try:
@@ -69,7 +70,7 @@ def find_repos(roots: list[Path], query: str = "", limit: int = 20) -> dict:
         except gitstate.GitError:
             dirty, branch = None, "?"
         repos.append({"path": str(repo), "branch": branch, "uncommitted_files": dirty,
-                      "last_activity": time.strftime("%Y-%m-%d", time.localtime(last_activity(repo)))})
+                      "last_activity": time.strftime("%Y-%m-%d", time.localtime(activity[repo]))})
     return {"repos": repos, "total_found": len(found), "matched": len(matches), "search_truncated": truncated,
             "searched": [str(r) for r in roots]}
 

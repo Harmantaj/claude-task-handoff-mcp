@@ -85,3 +85,28 @@ def test_find_repos_tool_is_limited_to_allowed_roots(tmp_path):
     assert not result["isError"] and str(inside) in text and "shop2" not in text
     empty = _tool("find_repos", {"query": "zzz-nothing"}, str(tmp_path / "allowed"))["content"][0]["text"]
     assert "No git repositories matching 'zzz-nothing'" in empty
+
+
+def test_git_status_does_not_rewrite_the_index(py_repo):
+    index = py_repo.root / ".git" / "index"
+    old = time.time() - 86400 * 30
+    os.utime(py_repo.root / "app" / "calc.py", (old + 60, old + 60))  # stale stat data invites an index refresh
+    os.utime(index, (old, old))
+    gitstate.dirty_files(py_repo.root)
+    discovery.find_repos([py_repo.root.parent])
+    assert index.stat().st_mtime == old
+
+
+def test_listing_order_matches_displayed_activity(tmp_path):
+    base = tmp_path / "h"
+    older, newer = _init(base / "older"), _init(base / "newer")
+    now = time.time()
+    for repo, age_days in ((older, 40), (newer, 2)):
+        for marker in (".git/HEAD",):
+            os.utime(repo / marker, (now - age_days * 86400,) * 2)
+        index = repo / ".git" / "index"
+        if index.exists():
+            os.utime(index, (now - age_days * 86400,) * 2)
+    repos = discovery.find_repos([base])["repos"]
+    assert [r["path"] for r in repos] == [str(newer), str(older)]
+    assert repos[0]["last_activity"] >= repos[1]["last_activity"]

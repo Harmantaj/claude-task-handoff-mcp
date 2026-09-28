@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import time
 from dataclasses import asdict, dataclass, field
@@ -20,6 +21,8 @@ MAX_SCAN_BYTES = 512_000
 
 class GitError(RuntimeError):
     pass
+
+
 
 
 class GitMissing(GitError):
@@ -40,6 +43,8 @@ def git(root: Path, *args: str, check: bool = True) -> str:
             text=True,
             stdin=subprocess.DEVNULL,
             errors="replace",
+            # Keep git strictly read-only: otherwise `git status` may rewrite .git/index to refresh stat data.
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
         )
     except FileNotFoundError as exc:
         raise GitMissing(GIT_INSTALL_HINT) from exc
