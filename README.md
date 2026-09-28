@@ -152,6 +152,38 @@ Before changing code, call task-handoff start_task for this repo. When done, cal
 with your claims and report its verdict verbatim. Do not claim success if it is not VERIFIED.
 ```
 
+### Buttons and dashboard in the Claude app
+
+**One-click actions.** In Claude Desktop, click **+** under the message box, then choose
+**Task Handoff Verifier**:
+
+| Menu item | What it does |
+|---|---|
+| Verify my latest work | Checks the latest changes in a project (optionally named) and shows the report |
+| Show handoff summary | Shows the last report without re-running checks |
+| Projects dashboard | Lists all your projects with their last result |
+| Start a task | Records a baseline before new work |
+| Check setup | Makes sure git, Python and your project tools are ready |
+
+In Claude Code the same items are slash commands, such as `/mcp__task-handoff__verify-work`.
+
+**Interactive report card.** In apps that support interactive tool results (MCP Apps), verification
+results appear as a card instead of plain text. It shows:
+
+- the verdict as a coloured tag
+- an evidence bar splitting the findings into verified, failed, claimed, inferred, not tested
+  and blocked
+- each check, with failure output expanded
+- the changed files
+- the suggested next step
+
+It has three buttons: **Ask Claude to fix** (sends the next step to the chat), **Re-run checks** and
+**Copy next step**.
+
+**Projects dashboard.** Ask *"open my projects dashboard"* or use the menu item. You get every repo
+with its branch, uncommitted files and last verdict, plus **Summary** and **Verify** buttons on each
+row. Clients without MCP Apps support get the same information as text.
+
 ### Automatic mode for Claude Code (every repo, no prompting)
 
 Two Claude Code hooks make verification automatic in every git repository you open, including
@@ -202,6 +234,7 @@ ask it to verify.
 | `verify_task(repo_path, claims=[], notes="")` | yes | Full verification plus claim cross-checking and the handoff report |
 | `summarize_handoff(repo_path)` | no | Re-show the last report without re-running; marks it `[STALE]` if the repo changed since |
 | `find_repos(query="")` | no | Find git repos on this computer (allowed directories or home folder), most recently active first, so people can name a project instead of giving a path |
+| `open_dashboard(limit=30)` | no | All local projects with branch, uncommitted files and last verdict (interactive dashboard where supported) |
 | `check_setup(repo_path="")` | no | Diagnose git, Python, node/npm, go, poetry, conda, plus the repo's interpreter and test dependencies, with exact fixes |
 
 All tools accept `format: "json"` for the full structured report.

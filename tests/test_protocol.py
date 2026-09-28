@@ -35,7 +35,7 @@ def test_handshake_ping_list_and_errors():
     assert by_id[1]["result"]["serverInfo"]["name"] == "task-handoff"
     assert by_id[2]["result"] == {}
     names = {t["name"] for t in by_id[3]["result"]["tools"]}
-    assert names == {"start_task", "inspect_task_state", "run_relevant_checks", "verify_task", "summarize_handoff", "find_repos", "check_setup"}
+    assert names == {"start_task", "inspect_task_state", "run_relevant_checks", "verify_task", "summarize_handoff", "find_repos", "check_setup", "open_dashboard"}
     assert all(t["inputSchema"]["type"] == "object" for t in by_id[3]["result"]["tools"])
     assert by_id[4]["error"]["code"] == -32601
     assert by_id[5]["error"]["code"] == -32602

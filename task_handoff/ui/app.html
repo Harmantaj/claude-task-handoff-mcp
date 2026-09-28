@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task Handoff</title>
+<style>
+  :root {
+    --bg: var(--color-background-primary, #ffffff);
+    --bg-2: var(--color-background-secondary, #f5f5f3);
+    --text: var(--color-text-primary, #1d1d1f);
+    --text-2: var(--color-text-secondary, #5f6168);
+    --line: var(--color-border-primary, #e2e2df);
+    --sans: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
+    --mono: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+    --tag: "Avenir Next Condensed", "Avenir Next", "Arial Narrow", var(--sans);
+
+    --pass: #1f7a5c;
+    --fail: #b3261e;
+    --partial: #a86b00;
+    --blocked: #5b5f97;
+    --claimed: #8a8f98;
+    --inferred: #3d6fb6;
+    --neutral: #6b6f76;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --bg: var(--color-background-primary, #1f1f22);
+    --bg-2: var(--color-background-secondary, #2a2a2e);
+    --text: var(--color-text-primary, #ececef);
+    --text-2: var(--color-text-secondary, #a4a6ad);
+    --line: var(--color-border-primary, #3a3a3f);
+    --pass: #3fae86;
+    --fail: #e5554b;
+    --partial: #d69a2d;
+    --blocked: #8f93d1;
+    --claimed: #9a9fa8;
+    --inferred: #6d9be0;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: var(--color-background-primary, #1f1f22);
+      --bg-2: var(--color-background-secondary, #2a2a2e);
+      --text: var(--color-text-primary, #ececef);
+      --text-2: var(--color-text-secondary, #a4a6ad);
+      --line: var(--color-border-primary, #3a3a3f);
+      --pass: #3fae86;
+      --fail: #e5554b;
+      --partial: #d69a2d;
+      --blocked: #8f93d1;
+      --claimed: #9a9fa8;
+      --inferred: #6d9be0;
+      color-scheme: dark;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 var(--sans); }
+  html { overflow: hidden; }
+  body { padding: 18px 18px 16px; max-width: 760px; }
+  button { font: inherit; }
+  :focus-visible { outline: 2px solid var(--inferred); outline-offset: 2px; border-radius: 4px; }
+
+  /* Header: the inspection tag is the one bold element */
+  .head { display: flex; gap: 16px; align-items: center; }
+  .tag {
+    --c: var(--neutral);
+    position: relative; flex: none; background: var(--c); color: #fff;
+    font-family: var(--tag); font-weight: 700; font-size: 22px; line-height: 1; letter-spacing: .01em;
+    padding: 12px 18px 12px 30px;
+    clip-path: polygon(14px 0, 100% 0, 100% 100%, 14px 100%, 0 50%);
+    animation: stamp .28s ease-out;
+  }
+  .tag::before {
+    content: ""; position: absolute; left: 13px; top: 50%; width: 8px; height: 8px; margin-top: -4px;
+    border-radius: 50%; background: var(--bg);
+  }
+  .tag[data-state="pass"] { --c: var(--pass); }
+  .tag[data-state="fail"] { --c: var(--fail); }
+  .tag[data-state="partial"] { --c: var(--partial); }
+  .tag[data-state="blocked"] { --c: var(--blocked); }
+  @keyframes stamp { from { transform: scale(1.06); opacity: 0; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .tag { animation: none; } }
+
+  .title h1 { font-size: 17px; font-weight: 650; margin: 0; line-height: 1.3; }
+  .title p { margin: 2px 0 0; color: var(--text-2); font-size: 13px; }
+  .title .repo { font-family: var(--mono); font-size: 12.5px; }
+  .stale { margin: 12px 0 0; padding: 8px 10px; border-left: 3px solid var(--partial); background: var(--bg-2);
+           font-size: 13px; }
+
+  /* Evidence strip */
+  .evidence { margin: 18px 0 4px; }
+  .strip { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--bg-2); }
+  .strip span { display: block; min-width: 3px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 12.5px; color: var(--text-2); }
+  .legend b { color: var(--text); font-weight: 600; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+
+  h2 { font-size: 13px; font-weight: 650; margin: 20px 0 6px; color: var(--text); }
+  h2 .count { color: var(--text-2); font-weight: 500; margin-left: 4px; }
+
+  /* Checks */
+  .checks { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+  .checks li { border-bottom: 1px solid var(--line); padding: 8px 0; }
+  .check-row { display: grid; grid-template-columns: 74px 1fr; gap: 10px; align-items: baseline; }
+  .outcome { font-size: 12px; font-weight: 650; }
+  .outcome.passed { color: var(--pass); }
+  .outcome.failed { color: var(--fail); }
+  .outcome.blocked { color: var(--blocked); }
+  .outcome.not_tested { color: var(--partial); }
+  .check-name { font-family: var(--mono); font-size: 13px; }
+  .check-detail { color: var(--text-2); font-size: 13px; }
+  details { margin: 6px 0 0 84px; }
+  summary { cursor: pointer; color: var(--text-2); font-size: 12.5px; }
+  pre { margin: 6px 0 0; padding: 10px; background: var(--bg-2); border-radius: 6px; overflow-x: auto;
+        font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; }
+
+  /* Files, findings, risks */
+  .files { margin: 0; padding: 0; list-style: none; font-size: 13px; }
+  .files li { display: flex; gap: 10px; padding: 3px 0; }
+  .files .path { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; flex: 1; }
+  .files .note { display: block; font-family: var(--sans); font-size: 12.5px; color: var(--text-2); }
+  .files .delta { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .files .status { color: var(--text-2); width: 72px; flex: none; }
+  .more { color: var(--text-2); font-size: 12.5px; margin: 4px 0 0; }
+  .findings { margin: 0; padding: 0; list-style: none; font-size: 13px; }
+  .findings li { display: grid; grid-template-columns: 92px 1fr; gap: 10px; padding: 3px 0; }
+  .label { font-size: 12px; font-weight: 600; }
+  .risks { margin: 0; padding-left: 18px; font-size: 13px; }
+  .risks li { margin: 2px 0; }
+
+  /* Next step + actions */
+  .next { margin: 20px 0 0; padding: 12px 14px; background: var(--bg-2); border-radius: 8px; }
+  .next p { margin: 0; font-size: 13.5px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .btn {
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 7px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px; font-weight: 550;
+  }
+  .btn:hover { border-color: var(--text-2); }
+  .btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .btn:disabled { opacity: .55; cursor: progress; }
+  .btn.link { border: 0; background: none; padding: 4px 0; color: var(--text-2); }
+  .status-line { font-size: 12.5px; color: var(--text-2); margin-top: 8px; min-height: 1em; }
+
+  /* Dashboard */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+  th { white-space: nowrap; text-align: left; font-weight: 600; color: var(--text-2); font-size: 12px; padding: 6px 8px 6px 0;
+       border-bottom: 1px solid var(--line); }
+  td { padding: 9px 8px 9px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  td.name b { font-weight: 600; }
+  td.name span { display: block; color: var(--text-2); font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .pill { font-weight: 650; font-size: 12px; }
+  .pill[data-state="pass"] { color: var(--pass); }
+  .pill[data-state="fail"] { color: var(--fail); }
+  .pill[data-state="partial"] { color: var(--partial); }
+  .pill[data-state="blocked"] { color: var(--blocked); }
+  .pill.none { color: var(--text-2); font-weight: 500; }
+  td.row-actions { white-space: nowrap; text-align: right; }
+  td.row-actions .btn { padding: 4px 9px; font-size: 12.5px; }
+  .empty, .waiting, .error { color: var(--text-2); padding: 24px 0; }
+  .error { color: var(--fail); white-space: pre-wrap; }
+
+  @media (max-width: 520px) {
+    .head { flex-direction: column; align-items: flex-start; gap: 10px; }
+    details { margin-left: 0; }
+    .check-row { grid-template-columns: 64px 1fr; }
+    th.hide-sm, td.hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+<main id="root"><p class="waiting">Waiting for the verification result…</p></main>
+<script>
+(() => {
+  "use strict";
+  const PROTOCOL_VERSION = "2026-01-26";
+  const REPORT_KEY = "task-handoff/report";
+  const DASHBOARD_KEY = "task-handoff/dashboard";
+  const root = document.getElementById("root");
+  let nextId = 1;
+  const pending = new Map();
+  let dashboard = null;     // last dashboard payload, for "All projects"
+  let current = null;       // payload currently shown
+
+  // ---------------------------------------------------------------- host bridge (JSON-RPC over postMessage)
+  const post = (msg) => window.parent.postMessage({ jsonrpc: "2.0", ...msg }, "*");
+  const request = (method, params) => new Promise((resolve, reject) => {
+    const id = nextId++;
+    pending.set(id, { resolve, reject });
+    post({ id, method, params });
+  });
+  const notify = (method, params) => post({ method, params });
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) return;
+    const msg = event.data;
+    if (!msg || msg.jsonrpc !== "2.0") return;
+    if (msg.id !== undefined && pending.has(msg.id) && !msg.method) {
+      const { resolve, reject } = pending.get(msg.id);
+      pending.delete(msg.id);
+      msg.error ? reject(new Error(msg.error.message || "Request failed")) : resolve(msg.result);
+      return;
+    }
+    switch (msg.method) {
+      case "ui/notifications/tool-result": handleResult(msg.params); break;
+      case "ui/notifications/host-context-changed": applyContext(msg.params); break;
+      case "ui/notifications/tool-cancelled":
+        if (!current) root.innerHTML = `<p class="empty">The check was cancelled.</p>`;
+        break;
+      case "ui/resource-teardown": post({ id: msg.id, result: {} }); break;
+      case "ping": post({ id: msg.id, result: {} }); break;
+      default:
+        if (msg.id !== undefined && msg.method) post({ id: msg.id, error: { code: -32601, message: "Method not found" } });
+    }
+  });
+
+  function applyContext(ctx) {
+    if (!ctx) return;
+    if (ctx.theme) document.documentElement.dataset.theme = ctx.theme;
+    const vars = ctx.styles && ctx.styles.variables;
+    if (vars) for (const [k, v] of Object.entries(vars)) if (v) document.documentElement.style.setProperty(k, v);
+  }
+
+  // Measure the body, not the document: the document is never shorter than the frame, so it could not shrink.
+  let lastHeight = 0;
+  new ResizeObserver(() => {
+    const height = Math.ceil(document.body.getBoundingClientRect().height);
+    if (height !== lastHeight) { lastHeight = height; notify("ui/notifications/size-changed", { height }); }
+  }).observe(document.body);
+
+  request("ui/initialize", {
+    appInfo: { name: "task-handoff", version: "0.5.0" },
+    appCapabilities: {},
+    protocolVersion: PROTOCOL_VERSION,
+  }).then((res) => {
+    applyContext(res && res.hostContext);
+    notify("ui/notifications/initialized", {});
+  }).catch(() => {});
+
+  // ---------------------------------------------------------------- helpers
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const STATE = {
+    "VERIFIED": "pass", "NO EXECUTABLE CHANGES": "pass", "FAILED": "fail", "PARTIALLY VERIFIED": "partial",
+    "NOT VERIFIED": "blocked", "NOT VERIFIED (inspection only)": "blocked", "NO CHANGES": "neutral",
+  };
+  const VERDICT_TEXT = {
+    "VERIFIED": "Verified", "NO EXECUTABLE CHANGES": "Nothing to run", "FAILED": "Failed",
+    "PARTIALLY VERIFIED": "Partly verified", "NOT VERIFIED": "Not verified",
+    "NOT VERIFIED (inspection only)": "Not run yet", "NO CHANGES": "No changes",
+  };
+  const OUTCOME_TEXT = { passed: "Passed", failed: "Failed", blocked: "Blocked", not_tested: "Not tested" };
+  const EVIDENCE = [
+    ["VERIFIED", "var(--pass)", "Verified"], ["FAILED", "var(--fail)", "Failed"], ["CLAIMED", "var(--claimed)", "Claimed"],
+    ["INFERRED", "var(--inferred)", "Inferred"], ["NOT TESTED", "var(--partial)", "Not tested"],
+    ["BLOCKED", "var(--blocked)", "Blocked"],
+  ];
+  function ago(iso) {
+    if (!iso) return "";
+    const t = Date.parse(iso.replace(/([+-]\d\d)(\d\d)$/, "$1:$2"));
+    if (isNaN(t)) return iso;
+    const s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 60) return "just now";
+    if (s < 3600) return `${Math.round(s / 60)} min ago`;
+    if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+    return `${Math.round(s / 86400)} d ago`;
+  }
+  const textOf = (result) => ((result && result.content) || []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
+
+  // ---------------------------------------------------------------- results
+  function handleResult(result) {
+    if (!result) return;
+    const meta = result._meta || {};
+    if (result.isError) { root.innerHTML = `<p class="error">${esc(textOf(result))}</p>`; return; }
+    if (meta[DASHBOARD_KEY]) { dashboard = meta[DASHBOARD_KEY]; current = dashboard; renderDashboard(dashboard); return; }
+    if (meta[REPORT_KEY]) { current = meta[REPORT_KEY]; renderReport(current); return; }
+    root.innerHTML = `<pre>${esc(textOf(result))}</pre>`;
+  }
+
+  async function callTool(name, args, button, busyText) {
+    const label = button && button.textContent;
+    if (button) { button.disabled = true; button.textContent = busyText; }
+    setStatus(name === "verify_task" ? "Running the relevant checks. Large test suites can take a minute." : "");
+    try {
+      const result = await request("tools/call", { name, arguments: args });
+      handleResult(result);
+    } catch (err) {
+      setStatus(`Couldn't run ${name}: ${err.message}`);
+      if (button) { button.disabled = false; button.textContent = label; }
+    }
+  }
+  function setStatus(text) { const el = document.getElementById("status"); if (el) el.textContent = text; }
+
+  // ---------------------------------------------------------------- report view
+  function renderReport(r) {
+    const state = STATE[r.verdict] || "neutral";
+    const total = Object.values(r.evidence_counts).reduce((a, b) => a + b, 0);
+    // Baselines recorded by the session hook are named after the session; the project name reads better.
+    const title = r.task && !/^Claude Code session\b/.test(r.task) ? r.task : `Changes in ${r.repo_name}`;
+    const checked = r.checks_ran ? `checked ${ago(r.generated_at)}` : `inspected ${ago(r.generated_at)}, checks not run`;
+
+    const strip = total ? EVIDENCE.map(([k, color]) => r.evidence_counts[k]
+      ? `<span style="flex:${r.evidence_counts[k]};background:${color}" title="${esc(k)}: ${r.evidence_counts[k]}"></span>` : "").join("") : "";
+    const legend = EVIDENCE.filter(([k]) => r.evidence_counts[k]).map(([k, color, label]) =>
+      `<span><i class="dot" style="background:${color}"></i>${label} <b>${r.evidence_counts[k]}</b></span>`).join("");
+
+    const checks = r.checks.length ? `<h2>Checks<span class="count">${r.checks.length}</span></h2>
+      <ul class="checks">${r.checks.map((c) => `
+        <li><div class="check-row">
+          <span class="outcome ${esc(c.outcome)}">${OUTCOME_TEXT[c.outcome] || esc(c.outcome)}</span>
+          <span><span class="check-name">${esc(c.id)}</span> <span class="check-detail">${esc(c.detail)}${c.duration_s ? ` in ${c.duration_s}s` : ""}</span></span>
+        </div>
+        ${(c.excerpt && c.excerpt.length) || c.command ? `<details${c.outcome === "failed" ? " open" : ""}><summary>${c.outcome === "failed" ? "Failure output" : "Details"}</summary>
+          <pre>${c.excerpt && c.excerpt.length ? esc(c.excerpt.join("\n")) + "\n\n" : ""}$ ${esc(c.command)}\n${esc(c.reason)}</pre></details>` : ""}
+        </li>`).join("")}</ul>` : "";
+
+    const files = r.changes.length ? `<h2>Changed files<span class="count">${r.changes_total}, +${r.added_total} −${r.removed_total}</span></h2>
+      <ul class="files">${r.changes.map((f) => `<li><span class="status">${esc(f.status)}</span>
+        <span class="path" title="${esc((f.categories || []).join(", "))}">${esc(f.path)}${f.note ? `<span class="note">${esc(f.note)}</span>` : ""}</span>
+        <span class="delta">+${f.added} −${f.removed}</span></li>`).join("")}</ul>
+      ${r.changes_total > r.changes.length ? `<p class="more">and ${r.changes_total - r.changes.length} more files</p>` : ""}
+      ${r.pre_existing_count ? `<p class="more">${r.pre_existing_count} file(s) you had already changed before the task are left out.</p>` : ""}` : "";
+
+    const shownFindings = r.findings.filter((f) => !(f.evidence === "VERIFIED" && /^\S+ (passed|FAILED) \(/.test(f.text))
+      && !((f.evidence === "BLOCKED" || f.evidence === "NOT TESTED") && r.checks.some((c) => f.text.startsWith(c.id + ":"))));
+    const color = Object.fromEntries(EVIDENCE.map(([k, c]) => [k, c]));
+    const findings = shownFindings.length ? `<h2>Evidence</h2><ul class="findings">${shownFindings.map((f) =>
+      `<li><span class="label" style="color:${color[f.evidence] || "var(--text-2)"}">${esc(f.evidence.charAt(0) + f.evidence.slice(1).toLowerCase())}</span><span>${esc(f.text)}</span></li>`).join("")}</ul>` : "";
+    const risks = r.risks.length ? `<h2>Worth a human look</h2><ul class="risks">${r.risks.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+
+    const needsFix = ["FAILED", "PARTIALLY VERIFIED", "NOT VERIFIED"].includes(r.verdict);
+    root.innerHTML = `
+      ${dashboard ? `<button class="btn link" id="back">All projects</button>` : ""}
+      <header class="head">
+        <div class="tag" data-state="${state}" role="status">${esc(VERDICT_TEXT[r.verdict] || r.verdict)}</div>
+        <div class="title"><h1>${esc(title)}</h1>
+          <p><span class="repo">${esc(r.repo_name)}</span>${r.branch ? ` on ${esc(r.branch)}` : ""}, ${esc(checked)}</p></div>
+      </header>
+      ${r.stale ? `<p class="stale">The project changed since the last check. This shows the current changes without re-running the checks.</p>` : ""}
+      ${total ? `<section class="evidence" aria-label="Evidence"><div class="strip">${strip}</div><div class="legend">${legend}</div></section>` : ""}
+      ${checks}${files}${findings}${risks}
+      <section class="next"><p>${esc(r.next_prompt)}</p>
+        <div class="actions">
+          ${needsFix ? `<button class="btn primary" id="fix">Ask Claude to fix</button>` : ""}
+          <button class="btn${needsFix ? "" : " primary"}" id="rerun">${r.checks_ran ? "Re-run checks" : "Run checks"}</button>
+          <button class="btn" id="copy">Copy next step</button>
+        </div>
+        <div class="status-line" id="status" aria-live="polite"></div>
+      </section>`;
+
+    const back = document.getElementById("back");
+    if (back) back.onclick = () => { current = dashboard; renderDashboard(dashboard); };
+    document.getElementById("rerun").onclick = (e) => callTool("verify_task", { repo_path: r.repo }, e.currentTarget, "Checking…");
+    document.getElementById("copy").onclick = async () => {
+      try { await navigator.clipboard.writeText(r.next_prompt); setStatus("Copied."); return; } catch { /* fall back */ }
+      const area = Object.assign(document.createElement("textarea"), { value: r.next_prompt });
+      area.style.cssText = "position:fixed;opacity:0";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand && document.execCommand("copy");
+      area.remove();
+      setStatus(ok ? "Copied." : "Copying isn't allowed here. Select the text above instead.");
+    };
+    const fix = document.getElementById("fix");
+    if (fix) fix.onclick = async () => {
+      fix.disabled = true;
+      try {
+        await request("ui/message", { role: "user", content: [{ type: "text",
+          text: `In ${r.repo}: ${r.next_prompt}\n\nAfter fixing, run task-handoff verify_task again and tell me the verdict.` }] });
+        setStatus("Sent to Claude.");
+      } catch (err) { setStatus(`Couldn't send the message: ${err.message}`); fix.disabled = false; }
+    };
+  }
+
+  // ---------------------------------------------------------------- dashboard view
+  function renderDashboard(d) {
+    if (!d.repos.length) {
+      root.innerHTML = `<p class="empty">No git projects found in ${esc(d.searched.join(", "))}. Open a project folder that uses git, or change Allowed directories in the extension settings.</p>`;
+      return;
+    }
+    root.innerHTML = `
+      <header class="title"><h1>Your projects</h1>
+        <p>${d.repos.length} most recently active${d.total_found > d.repos.length ? ` of ${d.total_found}` : ""}</p></header>
+      <table>
+        <thead><tr><th>Project</th><th class="hide-sm">Branch</th><th>Uncommitted</th><th>Last check</th><th></th></tr></thead>
+        <tbody>${d.repos.map((r, i) => {
+          const state = r.last_verdict ? (STATE[r.last_verdict] || "neutral") : "";
+          return `<tr>
+            <td class="name"><b>${esc(r.name)}</b><span title="${esc(r.path)}">${esc(r.location)}</span></td>
+            <td class="hide-sm">${esc(r.branch)}</td>
+            <td class="num">${r.uncommitted_files ?? "?"}</td>
+            <td>${r.last_verdict ? `<span class="pill" data-state="${state}">${esc(VERDICT_TEXT[r.last_verdict] || r.last_verdict)}</span><br><span class="check-detail">${esc(ago(r.last_checked))}</span>` : `<span class="pill none">Never</span>`}</td>
+            <td class="row-actions">
+              <button class="btn" data-act="summary" data-i="${i}">Summary</button>
+              <button class="btn primary" data-act="verify" data-i="${i}">Verify</button>
+            </td></tr>`;
+        }).join("")}</tbody>
+      </table>
+      <div class="status-line" id="status" aria-live="polite"></div>`;
+    root.querySelectorAll("button[data-act]").forEach((b) => {
+      const repo = d.repos[Number(b.dataset.i)];
+      b.onclick = () => b.dataset.act === "verify"
+        ? callTool("verify_task", { repo_path: repo.path }, b, "Checking…")
+        : callTool("summarize_handoff", { repo_path: repo.path }, b, "Loading…");
+    });
+  }
+})();
+</script>
+</body>
+</html>
