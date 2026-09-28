@@ -13,7 +13,7 @@ python3 scripts/make_icon.py build/bundle/icon.png
 rsync -a --exclude '__pycache__' task_handoff build/bundle/server/
 cp LICENSE build/bundle/
 
-npx -y @anthropic-ai/mcpb@2 validate build/bundle/manifest.json
-npx -y @anthropic-ai/mcpb@2 pack build/bundle "dist/task-handoff-$version.mcpb"
+npx -y @anthropic-ai/mcpb@2 validate build/bundle/manifest.json < /dev/null
+npx -y @anthropic-ai/mcpb@2 pack build/bundle "dist/task-handoff-$version.mcpb" < /dev/null
 # Stable name for the permanent link releases/latest/download/task-handoff.mcpb
 cp "dist/task-handoff-$version.mcpb" dist/task-handoff.mcpb
