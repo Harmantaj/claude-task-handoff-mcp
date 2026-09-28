@@ -29,11 +29,11 @@ def _finding(label: str, text: str) -> dict:
     return {"evidence": label, "text": text}
 
 
-def inspect(repo_path: str) -> tuple[Path, dict, "gitstate.ChangeSet"]:
+def inspect(repo_path: str, overrides: dict | None = None) -> tuple[Path, dict, "gitstate.ChangeSet"]:
     root = gitstate.repo_root(repo_path)
     from .config import load_config
 
-    config = load_config(root)
+    config = load_config(root, overrides)
     baseline = gitstate.load_baseline(root)
     changes = gitstate.collect_changes(root, baseline)
     for change in changes.attributed:
@@ -47,8 +47,8 @@ def _is_code(change) -> bool:
 
 
 def build_report(repo_path: str, *, run: bool = True, claims: list[str] | None = None,
-                 notes: str = "") -> dict:
-    root, config, changes = inspect(repo_path)
+                 notes: str = "", overrides: dict | None = None) -> dict:
+    root, config, changes = inspect(repo_path, overrides)
     baseline = gitstate.load_baseline(root)
     attributed = changes.attributed
     findings: list[dict] = []

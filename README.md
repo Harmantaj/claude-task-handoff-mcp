@@ -152,6 +152,46 @@ Before changing code, call task-handoff start_task for this repo. When done, cal
 with your claims and report its verdict verbatim. Do not claim success if it is not VERIFIED.
 ```
 
+### Automatic mode for Claude Code (every repo, no prompting)
+
+Two Claude Code hooks make verification automatic in every git repository you open, including
+new ones:
+
+- **Session start:** records the baseline, so work you had in progress isn't attributed to Claude.
+- **When Claude finishes a turn** that changed code, it runs targeted checks only (no full-suite
+  fallback, 120 s cap per check).
+  - **Failed:** Claude is sent back **once** with the failing output to fix it, or to tell you
+    plainly if the failure isn't from its change.
+  - **Otherwise:** you see a one-line verdict.
+  - **Skipped:** turns that changed nothing, or only docs.
+
+Add this to `~/.claude/settings.json` (merge into any existing `hooks`). The path should point at
+your clone, and `run_cli.py` needs no install:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "timeout": 30,
+      "command": "python3 ~/.local/share/claude-task-handoff-mcp/run_cli.py hook session-start" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "timeout": 600,
+      "command": "python3 ~/.local/share/claude-task-handoff-mcp/run_cli.py hook stop" }] }]
+  }
+}
+```
+
+Optionally, add this rule to `~/.claude/CLAUDE.md`: *"Before claiming a coding task is done, call
+task-handoff verify_task with your claims and report its verdict verbatim. If the automatic check
+flags a failure your change did not cause, tell the user instead of fixing unrelated code."*
+
+To switch it off:
+
+- **For one repo:** put `{"hooks": {"enabled": false}}` in its `.task-handoff.json`.
+- **Report only, never send Claude back:** use `{"hooks": {"block_on_failure": false}}` instead.
+- **Everywhere:** set `TASK_HANDOFF_HOOKS=0`.
+
+Claude Desktop chats have no hooks. There, Claude follows the extension's instructions when you
+ask it to verify.
+
 ### Tools
 
 | Tool | Runs checks? | What it does |
