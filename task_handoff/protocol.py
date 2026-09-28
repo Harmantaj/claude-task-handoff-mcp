@@ -18,6 +18,8 @@ from typing import Any, Callable
 
 SUPPORTED_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
 PROGRESS_INTERVAL_S = 10.0
+APPS_EXTENSION = "io.modelcontextprotocol/ui"  # MCP Apps: interactive UI rendered by the host
+APP_MIME_TYPE = "text/html;profile=mcp-app"
 
 
 class ToolError(Exception):
@@ -25,30 +27,68 @@ class ToolError(Exception):
 
 
 @dataclass
+class ToolOutput:
+    """Tool result: `text` goes to the model; `meta` (result `_meta`) carries data for UIs only."""
+
+    text: str
+    meta: dict | None = None
+
+
+@dataclass
 class Tool:
     name: str
     description: str
     input_schema: dict
-    handler: Callable[..., str]
+    handler: Callable[..., "str | ToolOutput"]
     annotations: dict | None = None
+    ui_resource: str | None = None  # ui:// resource the host renders for this tool's results
 
     def listing(self) -> dict:
         entry = {"name": self.name, "description": self.description, "inputSchema": self.input_schema}
         if self.annotations:
             entry["annotations"] = self.annotations
+        if self.ui_resource:
+            # Current key plus the legacy flat key read by older hosts.
+            entry["_meta"] = {"ui": {"resourceUri": self.ui_resource}, "ui/resourceUri": self.ui_resource}
         return entry
+
+
+@dataclass
+class UiResource:
+    uri: str
+    name: str
+    description: str
+    load: Callable[[], str]
+    meta: dict | None = None
+
+
+@dataclass
+class Prompt:
+    name: str
+    title: str
+    description: str
+    arguments: list  # [{"name", "description", "required"}]
+    render: Callable[..., str]
 
 
 class StdioServer:
     def __init__(self, name: str, version: str, instructions: str = "") -> None:
         self.name, self.version, self.instructions = name, version, instructions
         self.tools: dict[str, Tool] = {}
+        self.resources: dict[str, UiResource] = {}
+        self.prompts: dict[str, Prompt] = {}
         self._write_lock = threading.Lock()
         self._pool = ThreadPoolExecutor(max_workers=4)
         self._out = sys.stdout
 
     def tool(self, tool: Tool) -> None:
         self.tools[tool.name] = tool
+
+    def resource(self, resource: UiResource) -> None:
+        self.resources[resource.uri] = resource
+
+    def prompt(self, prompt: Prompt) -> None:
+        self.prompts[prompt.name] = prompt
 
     # ------------------------------------------------------------------ transport
 
@@ -74,7 +114,12 @@ class StdioServer:
         version = requested if requested in SUPPORTED_PROTOCOL_VERSIONS else SUPPORTED_PROTOCOL_VERSIONS[-1]
         result = {
             "protocolVersion": version,
-            "capabilities": {"tools": {"listChanged": False}},
+            "capabilities": {
+                "tools": {"listChanged": False},
+                "resources": {"listChanged": False},
+                "prompts": {"listChanged": False},
+                "extensions": {APPS_EXTENSION: {}},
+            },
             "serverInfo": {"name": self.name, "version": self.version},
         }
         if self.instructions:
@@ -102,8 +147,13 @@ class StdioServer:
         if token is not None:
             threading.Thread(target=heartbeat, daemon=True).start()
         try:
-            text = tool.handler(**(params.get("arguments") or {}))
-            result = {"content": [{"type": "text", "text": text}], "isError": False}
+            output = tool.handler(**(params.get("arguments") or {}))
+            if isinstance(output, ToolOutput):
+                result = {"content": [{"type": "text", "text": output.text}], "isError": False}
+                if output.meta:
+                    result["_meta"] = output.meta
+            else:
+                result = {"content": [{"type": "text", "text": output}], "isError": False}
         except ToolError as exc:
             result = {"content": [{"type": "text", "text": str(exc)}], "isError": True}
         except TypeError as exc:  # bad/missing arguments
@@ -130,8 +180,33 @@ class StdioServer:
             self._reply(msg_id, {"tools": [t.listing() for t in self.tools.values()]})
         elif method == "tools/call":
             self._pool.submit(self._call_tool, msg_id, params)
-        elif method in ("resources/list", "prompts/list"):
-            self._reply(msg_id, {method.split("/")[0]: []})
+        elif method == "resources/list":
+            self._reply(msg_id, {"resources": [
+                {"uri": r.uri, "name": r.name, "description": r.description, "mimeType": APP_MIME_TYPE}
+                for r in self.resources.values()]})
+        elif method == "resources/templates/list":
+            self._reply(msg_id, {"resourceTemplates": []})
+        elif method == "resources/read":
+            resource = self.resources.get(params.get("uri"))
+            if resource is None:
+                self._error(msg_id, -32002, f"Resource not found: {params.get('uri')}")
+                return
+            content = {"uri": resource.uri, "mimeType": APP_MIME_TYPE, "text": resource.load()}
+            if resource.meta:
+                content["_meta"] = resource.meta
+            self._reply(msg_id, {"contents": [content]})
+        elif method == "prompts/list":
+            self._reply(msg_id, {"prompts": [
+                {"name": p.name, "title": p.title, "description": p.description, "arguments": p.arguments}
+                for p in self.prompts.values()]})
+        elif method == "prompts/get":
+            prompt = self.prompts.get(params.get("name"))
+            if prompt is None:
+                self._error(msg_id, -32602, f"Unknown prompt: {params.get('name')}")
+                return
+            args = {k: v for k, v in (params.get("arguments") or {}).items() if isinstance(v, str)}
+            self._reply(msg_id, {"description": prompt.description, "messages": [
+                {"role": "user", "content": {"type": "text", "text": prompt.render(**args)}}]})
         else:
             self._error(msg_id, -32601, f"Method not found: {method}")
 

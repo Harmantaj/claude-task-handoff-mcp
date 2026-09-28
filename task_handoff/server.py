@@ -16,7 +16,9 @@ from . import __version__, gitstate
 from .discovery import check_setup as _check_setup
 from .discovery import find_repos as _find_repos
 from .handoff import build_report, load_report, render_markdown
-from .protocol import StdioServer, Tool, ToolError
+from .protocol import Prompt, StdioServer, Tool, ToolError, ToolOutput, UiResource
+from .ui import (DASHBOARD_KEY, REPORT_KEY, UI_URI, dashboard_payload, dashboard_text, load_app_html,
+                 report_payload)
 
 INSTRUCTIONS = """\
 Independent verification of coding work in a local git repository (pass an absolute repo_path).
@@ -60,8 +62,9 @@ def _resolve(repo_path: str) -> Path:
     return root
 
 
-def _out(report: dict, fmt: str) -> str:
-    return json.dumps(report, indent=2) if fmt == "json" else render_markdown(report)
+def _out(report: dict, fmt: str, *, stale: bool = False, prefix: str = "") -> ToolOutput:
+    text = json.dumps(report, indent=2) if fmt == "json" else prefix + render_markdown(report)
+    return ToolOutput(text, {REPORT_KEY: report_payload(report, stale=stale)})
 
 
 # ------------------------------------------------------------------------------ tools
@@ -104,17 +107,18 @@ def verify_task(repo_path: str, claims: list | None = None, notes: str = "", for
     return _out(report, format)
 
 
-def summarize_handoff(repo_path: str, format: str = "markdown") -> str:
+def summarize_handoff(repo_path: str, format: str = "markdown") -> ToolOutput:
     root = _resolve(repo_path)
     report = load_report(root)
     if report and report.get("state_fingerprint") == gitstate.state_fingerprint(root):
         return _out(report, format)
     fresh = build_report(str(root), run=False)
     if format == "json":
-        return json.dumps({"stale": bool(report), **fresh}, indent=2)
+        return ToolOutput(json.dumps({"stale": bool(report), **fresh}, indent=2),
+                          {REPORT_KEY: report_payload(fresh, stale=bool(report))})
     prefix = ("[STALE] The repository changed since the last verify_task; checks below were NOT re-run.\n\n"
               if report else "[NO PRIOR VERIFICATION] Showing inspection only; call verify_task to run checks.\n\n")
-    return prefix + render_markdown(fresh)
+    return _out(fresh, format, stale=bool(report), prefix=prefix)
 
 
 def find_repos(query: str = "", limit: int = 20) -> str:
@@ -139,6 +143,41 @@ def check_setup(repo_path: str = "") -> str:
     return _check_setup(ALLOWED_ROOTS, repo_path or None)
 
 
+def open_dashboard(limit: int = 30) -> ToolOutput:
+    payload = dashboard_payload(ALLOWED_ROOTS or [Path.home()], limit=max(1, min(int(limit), 50)))
+    return ToolOutput(dashboard_text(payload), {DASHBOARD_KEY: payload})
+
+
+PROMPTS = [
+    ("verify-work", "Verify my latest work",
+     "Check the latest changes in a project and show the verification report.",
+     [{"name": "project", "description": "Project name or path (optional: defaults to the most recently active)",
+       "required": False}],
+     lambda project="": (f"Verify the latest work in my project '{project}'." if project else
+                         "Verify the latest work in the project I was most recently working on.")
+     + " Use task-handoff: find_repos to locate it if needed, then verify_task. Summarize the verdict in two "
+       "sentences; the report card shows the details."),
+    ("handoff-summary", "Show handoff summary",
+     "Show the last verification report for a project without re-running checks.",
+     [{"name": "project", "description": "Project name or path (optional)", "required": False}],
+     lambda project="": (f"Show the task-handoff summary for my project '{project}'." if project else
+                         "Show the task-handoff summary for the project I was most recently working on.")
+     + " Use find_repos if needed, then summarize_handoff. Keep your reply to one or two sentences."),
+    ("projects-dashboard", "Projects dashboard",
+     "See all your projects with their last verification result.",
+     [], lambda: "Open my task-handoff projects dashboard (open_dashboard). Reply with one sentence."),
+    ("start-task", "Start a task",
+     "Record a baseline before new work so only the new changes are checked later.",
+     [{"name": "project", "description": "Project name or path", "required": True},
+      {"name": "task", "description": "What you're about to do", "required": True}],
+     lambda project="", task="": f"Start a task-handoff baseline in my project '{project}' for the task "
+                                 f"'{task}'. Use find_repos to locate it if needed, then start_task."),
+    ("check-setup", "Check setup",
+     "Make sure git, Python and your project tools are ready.",
+     [], lambda: "Run task-handoff check_setup and tell me in plain words if anything needs fixing."),
+]
+
+
 REPO = {"type": "string", "description": "Absolute path to (a directory inside) the git repository."}
 FORMAT = {"type": "string", "enum": ["markdown", "json"], "default": "markdown",
           "description": "markdown (compact handoff) or json (full structured report)."}
@@ -161,6 +200,7 @@ def build_server() -> StdioServer:
         "risk flags, and which checks would be selected. Runs nothing.",
         {"type": "object", "properties": {"repo_path": REPO, "format": FORMAT}, "required": ["repo_path"]},
         inspect_task_state, {"title": "Inspect task state", "readOnlyHint": True},
+        ui_resource=UI_URI,
     ))
     server.tool(Tool(
         "run_relevant_checks",
@@ -182,6 +222,7 @@ def build_server() -> StdioServer:
             "notes": {"type": "string", "description": "Optional free-text notes to include in the handoff."},
             "format": FORMAT}, "required": ["repo_path"]},
         verify_task, {"title": "Verify task", "readOnlyHint": False, "destructiveHint": False},
+        ui_resource=UI_URI,
     ))
     server.tool(Tool(
         "summarize_handoff",
@@ -189,6 +230,7 @@ def build_server() -> StdioServer:
         "report is marked stale and a fresh inspection-only report is returned.",
         {"type": "object", "properties": {"repo_path": REPO, "format": FORMAT}, "required": ["repo_path"]},
         summarize_handoff, {"title": "Summarize handoff", "readOnlyHint": True},
+        ui_resource=UI_URI,
     ))
     server.tool(Tool(
         "find_repos",
@@ -208,6 +250,19 @@ def build_server() -> StdioServer:
          "description": "Optional repository to diagnose."}}},
         check_setup, {"title": "Check setup", "readOnlyHint": True},
     ))
+    server.tool(Tool(
+        "open_dashboard",
+        "Show all local git projects (allowed directories or home folder) with branch, uncommitted changes and the "
+        "last verification verdict, as an interactive dashboard with Verify and Summary buttons.",
+        {"type": "object", "properties": {"limit": {"type": "integer", "default": 30, "minimum": 1, "maximum": 50}}},
+        open_dashboard, {"title": "Projects dashboard", "readOnlyHint": True}, ui_resource=UI_URI,
+    ))
+    server.resource(UiResource(
+        UI_URI, "Task Handoff", "Interactive verification report and projects dashboard", load_app_html,
+        meta={"ui": {"prefersBorder": True, "permissions": {"clipboardWrite": {}}}},
+    ))
+    for name, title, description, arguments, render in PROMPTS:
+        server.prompt(Prompt(name, title, description, arguments, render))
     return server
 
 

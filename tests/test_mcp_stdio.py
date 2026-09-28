@@ -10,7 +10,7 @@ import sys
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-EXPECTED_TOOLS = {"start_task", "inspect_task_state", "run_relevant_checks", "verify_task", "summarize_handoff", "find_repos", "check_setup"}
+EXPECTED_TOOLS = {"start_task", "inspect_task_state", "run_relevant_checks", "verify_task", "summarize_handoff", "find_repos", "check_setup", "open_dashboard"}
 
 
 def _text(result) -> str:
@@ -37,6 +37,8 @@ async def _session_flow(repo_root: str) -> dict:
             out["stale"] = _text(await session.call_tool("summarize_handoff", {"repo_path": repo_root}))
             out["checks"] = _text(await session.call_tool("run_relevant_checks", {"repo_path": repo_root}))
             out["bad"] = await session.call_tool("inspect_task_state", {"repo_path": "/nonexistent/path"})
+            out["prompts"] = [p.name for p in (await session.list_prompts()).prompts]
+            out["resource"] = (await session.read_resource("ui://task-handoff/app.html")).contents[0]
     return out
 
 
@@ -52,3 +54,5 @@ def test_stdio_end_to_end(py_repo):
     assert out["stale"].startswith("[STALE]")
     assert "PASSED pytest" in out["checks"] and "Verdict: VERIFIED" in out["checks"]
     assert out["bad"].is_error
+    assert "verify-work" in out["prompts"] and "projects-dashboard" in out["prompts"]
+    assert out["resource"].mime_type == "text/html;profile=mcp-app" and "ui/initialize" in out["resource"].text
