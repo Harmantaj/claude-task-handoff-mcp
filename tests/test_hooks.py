@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from task_handoff import gitstate, hooks
+from task_handoff.handoff import build_report
 
 
 def _stop(repo, **extra):
@@ -100,3 +101,30 @@ def test_cli_hook_subprocess(py_repo):
                              capture_output=True, text=True, timeout=60, cwd=str(py_repo.root),
                              env={**os.environ, "PYTHONPATH": project})
     assert garbage.returncode == 0
+
+
+def test_parallel_sessions_keep_their_own_baselines(py_repo):
+    hooks.run("session-start", json.dumps({"cwd": str(py_repo.root), "session_id": "A"}))
+    py_repo.write("app/calc.py", "def add(a, b):\n    return a + b  # from A\n")
+    hooks.run("session-start", json.dumps({"cwd": str(py_repo.root), "session_id": "B"}))  # must not reset A
+    py_repo.write("app/util.py", "def ident(x):\n    return x  # from B\n")
+
+    a = _stop(py_repo, session_id="A")
+    b = _stop(py_repo, session_id="B")
+    assert "python-syntax passed, pytest passed" in a["systemMessage"]
+    report_b = build_report(str(py_repo.root), run=False, session_id="B")
+    assert [c["path"] for c in report_b["changes"]] == ["app/util.py"]  # A's edit predates B's baseline
+    report_a = build_report(str(py_repo.root), run=False, session_id="A")
+    assert {c["path"] for c in report_a["changes"]} == {"app/calc.py", "app/util.py"}
+    assert b is not None
+
+
+def test_old_session_baselines_are_pruned(py_repo, monkeypatch):
+    monkeypatch.setattr(gitstate, "MAX_SESSION_BASELINES", 3)
+    for i in range(6):
+        gitstate.record_baseline(py_repo.root, "t", session_id=f"s{i}")
+        (gitstate.state_dir(py_repo.root) / "sessions" / f"s{i}.hook.json").write_text("{}")
+        os.utime(gitstate.state_dir(py_repo.root) / "sessions" / f"s{i}.json", (1000 + i, 1000 + i))
+    gitstate.record_baseline(py_repo.root, "t", session_id="s6")
+    names = sorted(p.name for p in (gitstate.state_dir(py_repo.root) / "sessions").iterdir())
+    assert names == ["s4.hook.json", "s4.json", "s5.hook.json", "s5.json", "s6.json"]

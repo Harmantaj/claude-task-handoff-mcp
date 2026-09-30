@@ -49,7 +49,7 @@ def load_config(repo_root: Path, overrides: dict | None = None) -> dict[str, Any
     config = copy.deepcopy(DEFAULTS)
     for candidate in (os.environ.get("TASK_HANDOFF_CONFIG"), repo_root / CONFIG_FILENAME):
         if candidate and Path(candidate).is_file():
-            config = _merge(config, json.loads(Path(candidate).read_text()))
+            config = _merge(config, json.loads(Path(candidate).read_text(encoding="utf-8")))
     if overrides:
         config = _merge(config, overrides)
     # Installing browsers/deps and destructive operations are never performed,

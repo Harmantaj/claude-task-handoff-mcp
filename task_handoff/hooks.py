@@ -40,8 +40,8 @@ def session_start(payload: dict) -> str | None:
         return None
     root, _ = found
     session_id = payload.get("session_id") or ""
-    existing = gitstate.load_baseline(root)
-    if existing and session_id and existing.get("session_id") == session_id:
+    existing = gitstate.load_baseline(root, session_id) if session_id else None
+    if existing and existing.get("session_id") == session_id:
         return None  # resumed/compacted session keeps its original baseline
     baseline = gitstate.record_baseline(root, f"Claude Code session {session_id[:8]}".strip(), session_id=session_id)
     pre = len(baseline["dirty"])
@@ -50,7 +50,9 @@ def session_start(payload: dict) -> str | None:
             + ". Your changes are verified automatically when you finish a turn; report failures honestly.")
 
 
-def _hook_state_path(root: Path) -> Path:
+def _hook_state_path(root: Path, session_id: str = "") -> Path:
+    if session_id:
+        return gitstate.state_dir(root) / "sessions" / f"{gitstate._safe_id(session_id)}.hook.json"
     return gitstate.state_dir(root) / "hook_state.json"
 
 
@@ -71,19 +73,20 @@ def stop(payload: dict) -> dict | None:
     if not found:
         return None
     root, config = found
-    state_file = _hook_state_path(root)
+    session_id = payload.get("session_id") or ""
+    state_file = _hook_state_path(root, session_id)
     try:
-        last = json.loads(state_file.read_text()).get("fingerprint")
+        last = json.loads(state_file.read_text(encoding="utf-8")).get("fingerprint")
     except (OSError, ValueError):
         last = None
     if gitstate.state_fingerprint(root) == last:
         return None  # nothing changed since the last automatic verification
 
     hooks = config["hooks"]
-    report = build_report(str(root), run=True, overrides={"verification": {
+    report = build_report(str(root), run=True, session_id=session_id or None, overrides={"verification": {
         "timeout_seconds": hooks["timeout_seconds"], "full_suite_fallback": hooks["full_suite_fallback"]}})
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps({"fingerprint": gitstate.state_fingerprint(root), "verdict": report["verdict"]}))
+    state_file.write_text(json.dumps({"fingerprint": gitstate.state_fingerprint(root), "verdict": report["verdict"]}), encoding="utf-8")
 
     if report["verdict"] in QUIET_VERDICTS:
         return None

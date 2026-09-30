@@ -29,12 +29,13 @@ def _finding(label: str, text: str) -> dict:
     return {"evidence": label, "text": text}
 
 
-def inspect(repo_path: str, overrides: dict | None = None) -> tuple[Path, dict, "gitstate.ChangeSet"]:
+def inspect(repo_path: str, overrides: dict | None = None,
+            session_id: str | None = None) -> tuple[Path, dict, "gitstate.ChangeSet"]:
     root = gitstate.repo_root(repo_path)
     from .config import load_config
 
     config = load_config(root, overrides)
-    baseline = gitstate.load_baseline(root)
+    baseline = gitstate.load_baseline(root, session_id)
     changes = gitstate.collect_changes(root, baseline)
     for change in changes.attributed:
         change.categories = categorize(change.path)
@@ -47,9 +48,9 @@ def _is_code(change) -> bool:
 
 
 def build_report(repo_path: str, *, run: bool = True, claims: list[str] | None = None,
-                 notes: str = "", overrides: dict | None = None) -> dict:
-    root, config, changes = inspect(repo_path, overrides)
-    baseline = gitstate.load_baseline(root)
+                 notes: str = "", overrides: dict | None = None, session_id: str | None = None) -> dict:
+    root, config, changes = inspect(repo_path, overrides, session_id)
+    baseline = gitstate.load_baseline(root, session_id)
     attributed = changes.attributed
     findings: list[dict] = []
 
@@ -124,7 +125,10 @@ def build_report(repo_path: str, *, run: bool = True, claims: list[str] | None =
     if changes.secrets:
         risks.insert(0, "Possible secrets in added content - do not commit until reviewed.")
 
-    verdict = _verdict(attributed, results, code_changes, untested, run)
+    # A unit-test run that found nothing to run is no gap when another passing test-level check covers its files.
+    gaps = [r for r in results if r.outcome == BLOCKED or (r.outcome == NOT_TESTED and not (
+        r.kind == "test" and r.covers and all(strongest.get(p, 0) >= KIND_STRENGTH["test"] for p in r.covers)))]
+    verdict = _verdict(attributed, results, gaps, code_changes, untested, run)
     report = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "repo": str(root),
@@ -151,16 +155,16 @@ def build_report(repo_path: str, *, run: bool = True, claims: list[str] | None =
     return report
 
 
-def _verdict(attributed, results, code_changes, untested, run) -> str:
+def _verdict(attributed, results, gaps, code_changes, untested, run) -> str:
     if not attributed:
         return "NO CHANGES"
     if any(r.outcome == FAILED for r in results):
         return "FAILED"
     if not run:
         return "NOT VERIFIED (inspection only)"
-    if not code_changes and not any(r.outcome in (BLOCKED, NOT_TESTED) for r in results):
+    if not code_changes and not gaps:
         return "NO EXECUTABLE CHANGES"
-    if any(r.outcome in (BLOCKED, NOT_TESTED) for r in results) or untested:
+    if gaps or untested:
         return "PARTIALLY VERIFIED" if any(r.outcome == PASSED for r in results) else "NOT VERIFIED"
     return "VERIFIED"
 
@@ -186,6 +190,10 @@ def next_prompt(report: dict) -> str:
     untested = [f["text"] for f in report["findings"] if f["evidence"] == NOT_TESTED_L and f["text"].startswith("No passing")]
     if untested:
         parts.append(untested[0].replace("No passing test exercised:", "Add or run tests covering") + ".")
+    if not parts and report["verdict"] in ("PARTIALLY VERIFIED", "NOT VERIFIED"):
+        missing = [f"{c['id']} ({c['detail']})" for c in checks if c["outcome"] == NOT_TESTED]
+        if missing:
+            parts.append("Get evidence for the checks that did not run: " + "; ".join(missing) + ".")
     if any("disappeared" in r for r in report["risks"]):
         parts.append("Confirm whether the discarded pre-existing changes should be restored.")
     if report["verdict"] in ("VERIFIED", "NO EXECUTABLE CHANGES") and not parts:
@@ -203,12 +211,12 @@ def next_prompt(report: dict) -> str:
 def save_report(root: Path, report: dict) -> None:
     directory = gitstate.state_dir(root)
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "last_report.json").write_text(json.dumps(report, indent=2))
+    (directory / "last_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
 
 def load_report(root: Path) -> dict | None:
     path = gitstate.state_dir(root) / "last_report.json"
-    return json.loads(path.read_text()) if path.is_file() else None
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
 # --------------------------------------------------------------------------- rendering

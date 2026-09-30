@@ -10,16 +10,16 @@ from __future__ import annotations
 import re
 from pathlib import Path, PurePosixPath
 
-from .checks import Check, _bin
+from .checks import Check, _bin, is_playwright_spec
 from .gitstate import FileChange
 
 CONFIG_RE = re.compile(r"(^|/)playwright\.config\.(ts|js|mjs|cjs|mts)$")
 SPEC_RE = re.compile(r"\.(spec|e2e|test)\.[cm]?[jt]sx?$")
 
 
-def is_relevant(changes: list[FileChange]) -> bool:
-    return any("frontend" in c.categories or CONFIG_RE.search(c.path) for c in changes
-               if c.status not in ("deleted", "reverted"))
+def is_relevant(root: Path, changes: list[FileChange]) -> bool:
+    return any("frontend" in c.categories or CONFIG_RE.search(c.path) or is_playwright_spec(root, c.path)
+               for c in changes if c.status not in ("deleted", "reverted"))
 
 
 def _stem(path: str) -> str:
@@ -29,7 +29,7 @@ def _stem(path: str) -> str:
 
 def playwright_checks(root: Path, changes: list[FileChange], all_files: list[str], config: dict) -> list[Check]:
     frontend = [c.path for c in changes if "frontend" in c.categories and c.status not in ("deleted", "reverted")]
-    if not is_relevant(changes):
+    if not is_relevant(root, changes):
         return []
     if not config["playwright"]["enabled"]:
         return [Check("playwright", "browser", [], str(root), "browser-relevant files changed", frontend,

@@ -1,7 +1,7 @@
 """Locate the Python interpreter a project actually uses.
 
-Order: in-repo virtualenv, Poetry environment, conda environment (from environment.yml),
-then python3 on PATH. Detection only reads files or asks the tool (`poetry env info`);
+Order: in-repo virtualenv, Poetry, pdm, hatch, conda (from environment.yml), pyenv
+(.python-version), then python3 on PATH. Detection only reads files or asks the tool (`poetry env info`);
 it never creates, activates or installs an environment.
 """
 
@@ -20,7 +20,8 @@ IN_REPO_VENVS = (".venv", "venv", "env")
 
 
 def _bin_python(env_dir: Path) -> Path | None:
-    for rel in ("bin/python", "bin/python3"):
+    # POSIX venvs/conda: bin/; Windows venvs: Scripts/; Windows conda: the env root.
+    for rel in ("bin/python", "bin/python3", "Scripts/python.exe", "python.exe"):
         candidate = env_dir / rel
         if candidate.exists():
             return candidate
@@ -43,7 +44,7 @@ def is_poetry_project(root: Path) -> bool:
     pyproject = root / "pyproject.toml"
     if (root / "poetry.lock").exists():
         return True
-    return pyproject.is_file() and "[tool.poetry" in pyproject.read_text(errors="replace")
+    return pyproject.is_file() and "[tool.poetry" in pyproject.read_text(encoding="utf-8", errors="replace")
 
 
 def poetry_env_name(name: str, project_dir: Path) -> str:
@@ -72,7 +73,7 @@ def _poetry_via_cli(root: Path) -> Path | None:
         return None
     try:
         proc = subprocess.run([poetry, "env", "info", "--executable", "--no-interaction"], cwd=root,
-                              capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=30)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return None
     path = proc.stdout.strip().splitlines()[-1].strip() if proc.returncode == 0 and proc.stdout.strip() else ""
@@ -80,7 +81,7 @@ def _poetry_via_cli(root: Path) -> Path | None:
 
 
 def _poetry_via_cache(root: Path) -> Path | None:
-    text = (root / "pyproject.toml").read_text(errors="replace") if (root / "pyproject.toml").is_file() else ""
+    text = (root / "pyproject.toml").read_text(encoding="utf-8", errors="replace") if (root / "pyproject.toml").is_file() else ""
     name = _toml_value(text, "tool.poetry", "name") or _toml_value(text, "project", "name")
     if not name:
         return None
@@ -106,6 +107,51 @@ def poetry_python(root: Path) -> Path | None:
     return _poetry_via_cli(root) or _poetry_via_cache(root)
 
 
+# --------------------------------------------------------------------------- pdm / hatch / pyenv
+
+
+def pdm_python(root: Path) -> Path | None:
+    """pdm records the project's interpreter in .pdm-python."""
+    marker = root / ".pdm-python"
+    if not marker.is_file():
+        return None
+    path = Path(marker.read_text(encoding="utf-8", errors="replace").strip()).expanduser()
+    return path if path.is_file() else None
+
+
+def is_hatch_project(root: Path) -> bool:
+    pyproject = root / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8", errors="replace") if pyproject.is_file() else ""
+    return "[tool.hatch" in text or (root / "hatch.toml").is_file()
+
+
+def hatch_python(root: Path) -> Path | None:
+    hatch = shutil.which("hatch")
+    if not hatch or not is_hatch_project(root):
+        return None
+    try:
+        proc = subprocess.run([hatch, "env", "find"], cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              stdin=subprocess.DEVNULL, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = proc.stdout.strip().splitlines() if proc.returncode == 0 else []
+    return _bin_python(Path(lines[0].strip())) if lines else None  # env may not be created yet
+
+
+def pyenv_python(root: Path) -> Path | None:
+    marker = root / ".python-version"
+    if not marker.is_file():
+        return None
+    versions = Path(os.environ.get("PYENV_ROOT") or Path.home() / ".pyenv") / "versions"
+    for name in marker.read_text(encoding="utf-8", errors="replace").split():
+        if name.startswith("#"):
+            continue
+        python = _bin_python(versions / name)
+        if python:
+            return python
+    return None
+
+
 # --------------------------------------------------------------------------- conda
 
 
@@ -114,7 +160,7 @@ def conda_env_spec(root: Path) -> tuple[str | None, str | None]:
     for filename in ("environment.yml", "environment.yaml"):
         spec = root / filename
         if spec.is_file():
-            text = spec.read_text(errors="replace")
+            text = spec.read_text(encoding="utf-8", errors="replace")
             name = re.search(r"(?m)^name:\s*[\"']?([^\"'#\s]+)", text)
             prefix = re.search(r"(?m)^prefix:\s*[\"']?([^\"'#\n]+?)[\"']?\s*$", text)
             return (name.group(1) if name else None, prefix.group(1).strip() if prefix else None)
@@ -127,7 +173,7 @@ def conda_env_dirs() -> list[Path]:
     envs: list[Path] = []
     registry = home / ".conda" / "environments.txt"  # conda/mamba record every env they create here
     if registry.is_file():
-        envs += [Path(line.strip()) for line in registry.read_text(errors="replace").splitlines() if line.strip()]
+        envs += [Path(line.strip()) for line in registry.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
     roots = [os.environ.get("CONDA_ENVS_PATH", ""), os.environ.get("CONDA_ENVS_DIRS", "")]
     env_parents = [Path(p).expanduser() for r in roots for p in r.split(os.pathsep) if p]
     for base in ("miniconda3", "anaconda3", "miniforge3", "mambaforge", "micromamba", ".micromamba",
@@ -171,14 +217,29 @@ def find_python(root: Path) -> tuple[str | None, str]:
     python = poetry_python(root)
     if python:
         return str(python), "poetry env"
+    python = pdm_python(root)
+    if python:
+        return str(python), "pdm (.pdm-python)"
+    python = hatch_python(root)
+    if python:
+        return str(python), "hatch env"
     python = conda_python(root)
     if python:
         return str(python), f"conda env '{conda_env_spec(root)[0] or python.parent.parent.name}'"
-    fallback = shutil.which("python3") or shutil.which("python")
+    python = pyenv_python(root)
+    if python:
+        return str(python), f"pyenv {python.parent.parent.name}"
+    # On Windows "python3" is often the Microsoft Store alias stub, so prefer "python" there.
+    names = ("python", "python3") if sys.platform == "win32" else ("python3", "python")
+    fallback = next((found for found in map(shutil.which, names) if found), None)
     hints = []
     if is_poetry_project(root):
         hints.append("poetry project but no poetry env found")
     if conda_env_spec(root) != (None, None):
         hints.append("environment.yml present but its conda env was not found")
+    if (root / ".python-version").is_file():
+        hints.append(".python-version present but that pyenv version is not installed")
+    if is_hatch_project(root) and not (root / ".venv").exists():
+        hints.append("hatch project but no hatch env found (is hatch on PATH? run `hatch env create`)")
     source = "python3 on PATH" + (f" ({'; '.join(hints)})" if hints else "")
     return fallback, source

@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import sys
 
 import pytest
 
@@ -282,6 +283,35 @@ def test_playwright_configured_but_unavailable_is_blocked(repo):
     assert "button.spec.ts" in pw["command"] and "checkout" not in pw["command"]  # targeted
 
 
+def _fake_bin(repo, name, stdout):
+    """Stand-in for a node_modules/.bin tool: records its arguments in <name>.args and prints `stdout`."""
+    path = repo.root / "web" / "node_modules" / ".bin" / name
+    if sys.platform == "win32":
+        path.with_suffix(".cmd").write_text(f'@echo off\r\necho %* > "%~dpn0.args"\r\necho {stdout}\r\nexit /b 0\r\n')
+    path.write_text(f"#!/bin/sh\necho \"$@\" > \"$0.args\"\necho '{stdout}'\nexit 0\n")
+    path.chmod(0o755)
+    return path
+
+
+@needs_npm
+def test_playwright_spec_is_not_given_to_vitest_and_empty_vitest_run_is_not_a_pass(repo):
+    _node_project(repo, {"test": "vitest run"}, deps_installed=True)
+    repo.write("web/playwright.config.ts", "export default {};\n")
+    repo.write("web/e2e/button.spec.ts", "import { test } from '@playwright/test';\n")
+    repo.commit("pw")
+    vitest = _fake_bin(repo, "vitest", "No test files found, exiting with code 0")
+    _fake_bin(repo, "playwright", "1 passed (1s)")
+    gitstate.record_baseline(repo.root, "t")
+    repo.write("web/src/components/Button.tsx", "export const Button = () => 'hi';\n")
+    repo.write("web/e2e/button.spec.ts", "import { test } from '@playwright/test';\n// updated\n")
+    report = build_report(str(repo.root))
+    args = (vitest.parent / "vitest.args").read_text()
+    assert "Button.tsx" in args and "button.spec.ts" not in args
+    assert by_id(report, "test[web]")["outcome"] == "not_tested"
+    assert by_id(report, "playwright[web]")["outcome"] == "passed"
+    assert report["verdict"] == "VERIFIED"  # the passing browser spec covers the component
+
+
 @needs_npm
 def test_build_failure_after_dependency_change(repo):
     _node_project(repo, {"build": "node -e \"console.error('Build error: boom'); process.exit(1)\""},
@@ -346,3 +376,17 @@ def test_generated_files_in_one_directory_collapse_to_one_line(py_repo):
     md = render_markdown(build_report(str(py_repo.root), run=False))
     assert "- `db/reports/` 6 non-code files (untracked) +6/-0" in md
     assert "r3.json" not in md and "`app/calc.py` modified" in md
+
+
+def test_legacy_hash_baselines_still_attribute_correctly(py_repo):
+    import hashlib
+
+    py_repo.write("app/util.py", "def ident(x):\n    return x  # WIP\n")
+    baseline = gitstate.record_baseline(py_repo.root, "t")
+    content = (py_repo.root / "app/util.py").read_bytes()
+    baseline["dirty"]["app/util.py"] = hashlib.sha256(content).hexdigest()  # format used before 0.6.0
+    (gitstate.state_dir(py_repo.root) / "baseline.json").write_text(json.dumps(baseline))
+    py_repo.write("app/calc.py", "def add(a, b):\n    return a + b  # task\n")
+    report = build_report(str(py_repo.root), run=False)
+    assert [c["path"] for c in report["changes"]] == ["app/calc.py"]
+    assert report["pre_existing_unrelated"] == ["app/util.py"]

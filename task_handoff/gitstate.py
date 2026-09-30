@@ -30,7 +30,8 @@ class GitMissing(GitError):
 
 
 GIT_INSTALL_HINT = ("git is not available. On macOS run `xcode-select --install` (Apple's Command Line Tools, "
-                    "which include git and python3); on Linux install git with your package manager.")
+                    "which include git and python3); on Windows install Git for Windows (https://git-scm.com); "
+                    "on Linux install git with your package manager.")
 # macOS ships /usr/bin/git as a stub that fails like this until the Command Line Tools are installed.
 XCRUN_MISSING = ("invalid active developer path", "xcrun: error", "No developer tools were found")
 
@@ -40,7 +41,7 @@ def git(root: Path, *args: str, check: bool = True) -> str:
         proc = subprocess.run(
             ["git", "-C", str(root), *args],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
             stdin=subprocess.DEVNULL,
             errors="replace",
             # Keep git strictly read-only: otherwise `git status` may rewrite .git/index to refresh stat data.
@@ -96,12 +97,23 @@ def dirty_files(root: Path) -> dict[str, str]:
 
 
 def fingerprint(root: Path, path: str) -> str:
+    """Cheap change signature (size + mtime), so repos with thousands of dirty files stay fast."""
     full = root / path
-    if not full.exists():
+    try:
+        st = full.lstat()
+    except OSError:
         return "<deleted>"
     if full.is_dir():  # e.g. nested repository shown as untracked dir
         return "<dir>"
-    return hashlib.sha256(full.read_bytes()).hexdigest()
+    return f"stat:{st.st_size}:{st.st_mtime_ns}"
+
+
+def same_content(root: Path, path: str, recorded: str) -> bool:
+    """Whether `path` still matches a signature recorded earlier (stat, or sha256 from older baselines)."""
+    if recorded.startswith("stat:") or recorded in ("<deleted>", "<dir>"):
+        return fingerprint(root, path) == recorded
+    full = root / path  # legacy baseline: content hash
+    return full.is_file() and hashlib.sha256(full.read_bytes()).hexdigest() == recorded
 
 
 # --------------------------------------------------------------------------- baseline
@@ -117,13 +129,40 @@ def record_baseline(root: Path, task: str, session_id: str = "") -> dict:
     }
     directory = state_dir(root)
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "baseline.json").write_text(json.dumps(baseline, indent=2))
+    text = json.dumps(baseline, indent=2)
+    (directory / "baseline.json").write_text(text, encoding="utf-8")  # latest baseline, used by the MCP tools
+    if session_id:  # each Claude Code session also keeps its own, so parallel sessions don't reset each other
+        sessions = directory / "sessions"
+        sessions.mkdir(exist_ok=True)
+        (sessions / f"{_safe_id(session_id)}.json").write_text(text, encoding="utf-8")
+        _prune(sessions)
     return baseline
 
 
-def load_baseline(root: Path) -> dict | None:
-    path = state_dir(root) / "baseline.json"
-    return json.loads(path.read_text()) if path.is_file() else None
+MAX_SESSION_BASELINES = 30
+
+
+def _safe_id(session_id: str) -> str:
+    return "".join(c for c in session_id if c.isalnum() or c in "-_")[:80] or "session"
+
+
+def _prune(directory: Path) -> None:
+    """Keep the newest session baselines; remove older ones with their hook state (our own files only)."""
+    baselines = [f for f in directory.glob("*.json") if not f.name.endswith(".hook.json")]
+    baselines.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+    for stale in baselines[MAX_SESSION_BASELINES:]:
+        stale.unlink()
+        (directory / (stale.name[:-len(".json")] + ".hook.json")).unlink(missing_ok=True)
+
+
+def load_baseline(root: Path, session_id: str | None = None) -> dict | None:
+    directory = state_dir(root)
+    if session_id:
+        own = directory / "sessions" / f"{_safe_id(session_id)}.json"
+        if own.is_file():
+            return json.loads(own.read_text(encoding="utf-8"))
+    path = directory / "baseline.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
 def state_fingerprint(root: Path) -> str:
@@ -240,7 +279,6 @@ def collect_changes(root: Path, baseline: dict | None) -> ChangeSet:
     for path in sorted(set(dirty) | set(committed) | set(base_dirty)):
         in_now = path in dirty or path in committed
         if path in base_dirty:
-            now_fp = fingerprint(root, path)
             if not in_now:
                 # Was dirty at baseline, now matches HEAD: the pre-existing change was discarded
                 # or committed without a diff against the baseline commit.
@@ -248,7 +286,7 @@ def collect_changes(root: Path, baseline: dict | None) -> ChangeSet:
                     FileChange(path, "reverted", note="pre-existing uncommitted change is gone (discarded?)")
                 )
                 continue
-            if now_fp == base_dirty[path] and path not in committed:
+            if path not in committed and same_content(root, path, base_dirty[path]):
                 pre_existing.append(path)
                 continue
             status = committed.get(path) or _status_word(dirty[path])

@@ -77,7 +77,7 @@ def find_repos(roots: list[Path], query: str = "", limit: int = 20) -> dict:
 
 def _version(argv: list[str]) -> str | None:
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=15)
+        proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=15)
     except (OSError, subprocess.TimeoutExpired):
         return None
     out = (proc.stdout or proc.stderr).strip().splitlines()
