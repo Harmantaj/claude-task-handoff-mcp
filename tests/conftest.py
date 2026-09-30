@@ -5,8 +5,21 @@ from pathlib import Path
 import pytest
 
 
+WINDOWS = sys.platform == "win32"
+posix_shell = pytest.mark.skipif(WINDOWS, reason="uses a POSIX shell script as a stand-in tool")
+
+
 def make_python(path: Path) -> Path:
-    """Create an executable that behaves like an environment's python (delegates to the test runner's)."""
+    """Create an executable that behaves like an environment's python (delegates to the test runner's).
+
+    `path` is given in POSIX layout (<env>/bin/python); on Windows a real venv sharing the runner's
+    site-packages is created instead and its <env>/Scripts/python.exe is returned.
+    """
+    if WINDOWS:
+        env_dir = path.parent.parent
+        subprocess.run([sys.executable, "-m", "venv", "--system-site-packages", "--without-pip", str(env_dir)],
+                       check=True, capture_output=True)
+        return env_dir / "Scripts" / "python.exe"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"#!/bin/sh\nexec '{sys.executable}' \"$@\"\n")
     path.chmod(0o755)

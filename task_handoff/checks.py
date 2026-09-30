@@ -10,6 +10,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -61,14 +62,14 @@ def _has_module(python: str, module: str) -> bool:
 
 def _pyproject_has(root: Path, section: str) -> bool:
     py = root / "pyproject.toml"
-    return py.is_file() and f"[{section}" in py.read_text(errors="replace")
+    return py.is_file() and f"[{section}" in py.read_text(encoding="utf-8", errors="replace")
 
 
 def _pytest_configured(root: Path, files: list[str]) -> bool:
     if _exists_any(root, ["pytest.ini", "conftest.py", "tox.ini"]) or _pyproject_has(root, "tool.pytest"):
         return True
     cfg = root / "setup.cfg"
-    if cfg.is_file() and "[tool:pytest]" in cfg.read_text(errors="replace"):
+    if cfg.is_file() and "[tool:pytest]" in cfg.read_text(encoding="utf-8", errors="replace"):
         return True
     return any(re.search(r"(^|/)(test_[^/]+|[^/]+_test)\.py$", f) for f in files)
 
@@ -176,10 +177,19 @@ def _package_manager(pkg_dir: Path, root: Path) -> str:
 
 def _bin(pkg_dir: Path, root: Path, name: str) -> str | None:
     for directory in (pkg_dir, root):
-        candidate = directory / "node_modules" / ".bin" / name
-        if candidate.exists():
-            return str(candidate)
+        for suffix in ((".cmd", "") if sys.platform == "win32" else ("",)):
+            candidate = directory / "node_modules" / ".bin" / (name + suffix)
+            if candidate.exists():
+                return str(candidate)
     return None
+
+
+def is_playwright_spec(root: Path, path: str) -> bool:
+    """Playwright specs run under Playwright only; vitest/jest cannot load them."""
+    try:
+        return "@playwright/test" in (root / path).read_text(encoding="utf-8", errors="replace")[:20000]
+    except OSError:
+        return False
 
 
 def _js_checks(root: Path, changes: list[FileChange], config: dict) -> list[Check]:
@@ -197,11 +207,12 @@ def _js_checks(root: Path, changes: list[FileChange], config: dict) -> list[Chec
     for pkg_dir, pkg_changes in groups.items():
         rel = pkg_dir.relative_to(root).as_posix()
         label = "" if rel == "." else f"[{rel}]"
-        manifest = json.loads((pkg_dir / "package.json").read_text() or "{}")
+        manifest = json.loads((pkg_dir / "package.json").read_text(encoding="utf-8") or "{}")
         scripts: dict[str, str] = manifest.get("scripts", {})
         pm = _package_manager(pkg_dir, root)
         covers = [c.path for c in pkg_changes]
         code = [c.path for c in pkg_changes if language(c.path) == "javascript" and c.status not in ("deleted", "reverted")]
+        unit_code = [p for p in code if not is_playwright_spec(root, p)]
         deps_or_config = any({"dependency", "config"} & set(c.categories) for c in pkg_changes)
 
         blocked = None
@@ -230,17 +241,18 @@ def _js_checks(root: Path, changes: list[FileChange], config: dict) -> list[Chec
 
         test_script = scripts.get("test", "")
         placeholder = "no test specified" in test_script
-        if test_script and not placeholder and (code or deps_or_config):
-            rel_code = [str((root / p).relative_to(pkg_dir)) for p in code]
-            if "vitest" in test_script and code and _bin(pkg_dir, root, "vitest"):
+        if test_script and not placeholder and (unit_code or deps_or_config):
+            rel_code = [str((root / p).relative_to(pkg_dir)) for p in unit_code]
+            if "vitest" in test_script and unit_code and _bin(pkg_dir, root, "vitest"):
                 argv, scope, why = [_bin(pkg_dir, root, "vitest"), "related", "--run", *rel_code], "targeted", \
                     "vitest tests related to changed files"
-            elif "jest" in test_script and code and _bin(pkg_dir, root, "jest"):
+            elif "jest" in test_script and unit_code and _bin(pkg_dir, root, "jest"):
                 argv, scope, why = [_bin(pkg_dir, root, "jest"), "--findRelatedTests", "--passWithNoTests", *rel_code], \
                     "targeted", "jest tests related to changed files"
             else:
                 argv, scope, why = run_script("test"), "full", "'test' script (runner cannot be targeted)"
-            checks.append(Check(f"test{label}", "test", argv, str(pkg_dir), why, covers, scope=scope,
+            runner = "vitest" if "vitest" in why else "jest" if "jest" in why else "generic"
+            checks.append(Check(f"test{label}", "test", argv, str(pkg_dir), why, covers, scope=scope, runner=runner,
                                 blocked_reason=blocked))
         elif code and (not test_script or placeholder):
             checks.append(Check(f"test{label}", "test", [], str(pkg_dir), "JS/TS files changed", covers,

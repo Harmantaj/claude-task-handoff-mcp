@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from conftest import Repo
+from conftest import Repo, posix_shell
 from task_handoff import discovery, gitstate
 
 
@@ -54,6 +54,7 @@ def test_missing_git_gives_actionable_error(tmp_path, monkeypatch):
         gitstate.repo_root(tmp_path)
 
 
+@posix_shell
 def test_macos_git_stub_without_command_line_tools(tmp_path, monkeypatch):
     fake = tmp_path / "bin"
     fake.mkdir()

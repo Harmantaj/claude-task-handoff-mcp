@@ -213,6 +213,9 @@ class StdioServer:
     def serve(self) -> None:
         # Anything printed to stdout by accident would corrupt the protocol stream,
         # so the real stdout is kept for protocol messages and sys.stdout is redirected.
+        for stream in (sys.stdin, sys.stdout, sys.stderr):  # Windows consoles/pipes default to a code page
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
         self._out = sys.stdout
         sys.stdout = sys.stderr
         for raw in sys.stdin:

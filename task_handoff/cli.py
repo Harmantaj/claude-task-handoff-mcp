@@ -26,6 +26,9 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--json", action="store_true")
     h = sub.add_parser("hook"); h.add_argument("event", choices=["session-start", "stop"])
     args = parser.parse_args(argv)
+    for stream in (sys.stdin, sys.stdout, sys.stderr):  # hook payloads and reports are UTF-8 on every OS
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
 
     if args.cmd == "hook":
         from .hooks import run as run_hook

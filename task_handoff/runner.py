@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import signal
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
@@ -15,6 +17,19 @@ from .redact import redact
 
 # Outcomes. A check that did not demonstrably pass is never reported as passed.
 PASSED, FAILED, BLOCKED, NOT_TESTED = "passed", "failed", "blocked", "not_tested"
+WINDOWS = sys.platform == "win32"
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill a timed-out check together with everything it spawned (test workers, browsers)."""
+    if WINDOWS:
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True,
+                       stdin=subprocess.DEVNULL)
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 SIGNAL_LINE = re.compile(
     r"(?i)(\bfail(ed|ure|ing)?\b|\berror\b|assert|exception|traceback|✘|✗|×|\bpassed\b|\btests?\b.*\b\d+\b|"
@@ -65,12 +80,15 @@ def run_check(check: Check, timeout: int, max_lines: int) -> CheckResult:
         return CheckResult(**base, outcome=NOT_TESTED, detail=check.not_tested_reason or "no command available")
 
     env = {**os.environ, "CI": "1", "NO_COLOR": "1", "FORCE_COLOR": "0", "PYTHONDONTWRITEBYTECODE": "1"}
+    argv = list(check.argv)
+    if WINDOWS:  # npm, npx, yarn... are .cmd shims that CreateProcess only finds by full path
+        argv[0] = shutil.which(argv[0]) or argv[0]
     start = time.monotonic()
     try:
         proc = subprocess.Popen(
-            check.argv, cwd=check.cwd, env=env, stdin=subprocess.DEVNULL,  # never touch MCP stdio
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
-            start_new_session=True,
+            argv, cwd=check.cwd, env=env, stdin=subprocess.DEVNULL,  # never touch MCP stdio
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+            **({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {"start_new_session": True}),
         )
     except FileNotFoundError:
         return CheckResult(**base, outcome=BLOCKED, detail=f"executable not found: {check.argv[0]}")
@@ -79,10 +97,7 @@ def run_check(check: Check, timeout: int, max_lines: int) -> CheckResult:
     try:
         output, _ = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        _kill_tree(proc)
         output, _ = proc.communicate()
         return CheckResult(**base, outcome=BLOCKED, detail=f"timed out after {timeout}s (result unknown)",
                            duration_s=round(time.monotonic() - start, 1), excerpt=_excerpt(output or "", max_lines))
@@ -92,7 +107,7 @@ def run_check(check: Check, timeout: int, max_lines: int) -> CheckResult:
     summary = _summary_line(output)
 
     if code == 0:
-        if check.runner == "playwright" and re.search(r"(?i)no tests found", output):
+        if check.runner in ("playwright", "vitest", "jest") and re.search(r"(?i)no tests? (files )?found", output):
             return CheckResult(**base, outcome=NOT_TESTED, detail="no tests matched", exit_code=code,
                                duration_s=duration, excerpt=excerpt)
         return CheckResult(**base, outcome=PASSED, detail=summary or "exit code 0", exit_code=code,

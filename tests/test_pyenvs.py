@@ -5,7 +5,7 @@ import shutil
 
 import pytest
 
-from conftest import make_python
+from conftest import make_python, posix_shell
 from task_handoff import gitstate, pyenvs
 from task_handoff.handoff import build_report
 
@@ -53,6 +53,7 @@ def test_poetry_env_found_in_cache_without_cli(repo, tmp_path, monkeypatch, no_p
     assert pytest_check["outcome"] == "passed" and "python: poetry env" in pytest_check["reason"]
 
 
+@posix_shell
 def test_poetry_cli_is_preferred_when_available(repo, tmp_path, monkeypatch):
     interpreter = make_python(tmp_path / "somewhere" / "bin" / "python")
     fake_bin = tmp_path / "fakebin"
@@ -131,3 +132,37 @@ def test_real_poetry_cli_and_cache_agree(repo, tmp_path, monkeypatch):
     via_cache = pyenvs._poetry_via_cache(repo.root)
     assert via_cli is not None and via_cache is not None
     assert via_cli.parent.parent == via_cache.parent.parent
+
+
+def test_pdm_interpreter_file(repo, tmp_path, no_poetry_cli):
+    interpreter = make_python(tmp_path / "pdm-env" / "bin" / "python")
+    _python_project(repo, extra={".pdm-python": f"{interpreter}\n"})
+    assert pyenvs.find_python(repo.root) == (str(interpreter), "pdm (.pdm-python)")
+
+
+@posix_shell
+def test_hatch_env_via_cli(repo, tmp_path, monkeypatch, no_poetry_cli):
+    env_dir = tmp_path / "hatch-envs" / "proj-abc" / "default"
+    interpreter = make_python(env_dir / "bin" / "python")
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    (fake_bin / "hatch").write_text(f"#!/bin/sh\n[ \"$1 $2\" = 'env find' ] && echo '{env_dir}' && exit 0\nexit 1\n")
+    (fake_bin / "hatch").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}{os.environ['PATH']}")
+    _python_project(repo, "[project]\nname = 'h'\nversion = '0'\n\n[tool.hatch.envs.default]\n")
+    assert pyenvs.find_python(repo.root) == (str(interpreter), "hatch env")
+
+
+def test_pyenv_version_file(repo, tmp_path, monkeypatch, no_poetry_cli):
+    monkeypatch.setenv("PYENV_ROOT", str(tmp_path / "pyenv"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    interpreter = make_python(tmp_path / "pyenv" / "versions" / "3.12.4" / "bin" / "python")
+    _python_project(repo, extra={".python-version": "3.11.9 3.12.4\n"})  # first missing, second installed
+    assert pyenvs.find_python(repo.root) == (str(interpreter), "pyenv 3.12.4")
+
+
+def test_pyenv_version_missing_is_reported(repo, tmp_path, monkeypatch, no_poetry_cli):
+    monkeypatch.setenv("PYENV_ROOT", str(tmp_path / "pyenv"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _python_project(repo, extra={".python-version": "3.99.0\n"})
+    assert ".python-version present but that pyenv version is not installed" in pyenvs.find_python(repo.root)[1]
