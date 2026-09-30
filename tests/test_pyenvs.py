@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import sys
 
 import pytest
 
@@ -32,6 +33,7 @@ def _python_project(repo, pyproject=None, extra=None):
 POETRY_TOML = "[tool.poetry]\nname = \"Demo App\"\nversion = \"0.1.0\"\n\n[tool.pytest.ini_options]\n"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="reference hash is for a POSIX path")
 def test_poetry_env_name_matches_real_poetry():
     # Reference value produced by poetry 2.5.1's EnvManager.generate_env_name for these inputs.
     assert pyenvs.poetry_env_name("Demo App", "/opt/no-such-dir/demo-app") == "demo_app-33OaQNpZ"
@@ -89,6 +91,7 @@ def test_conda_env_from_registry(repo, tmp_path, monkeypatch, no_poetry_cli):
     (home / ".conda").mkdir(parents=True)
     (home / ".conda" / "environments.txt").write_text(f"{tmp_path}/anywhere/base\n{env_dir}\n")
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
     _python_project(repo, extra={"environment.yml": "name: shopenv\nchannels: [conda-forge]\n"})
     python, source = pyenvs.find_python(repo.root)
     assert python == str(interpreter) and source == "conda env 'shopenv'"
@@ -100,12 +103,14 @@ def test_conda_env_from_install_root(repo, tmp_path, monkeypatch, no_poetry_cli)
     home = tmp_path / "home"
     interpreter = make_python(home / "miniforge3" / "envs" / "shopenv" / "bin" / "python")
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
     _python_project(repo, extra={"environment.yaml": "name: \"shopenv\"  # dev env\n"})
     assert pyenvs.find_python(repo.root) == (str(interpreter), "conda env 'shopenv'")
 
 
 def test_conda_prefix_is_honoured(repo, tmp_path, monkeypatch, no_poetry_cli):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))  # Path.home() on Windows
     interpreter = make_python(tmp_path / "envs" / "custom" / "bin" / "python")
     _python_project(repo, extra={"environment.yml": f"name: custom\nprefix: {tmp_path}/envs/custom\n"})
     assert pyenvs.find_python(repo.root)[0] == str(interpreter)
@@ -113,6 +118,7 @@ def test_conda_prefix_is_honoured(repo, tmp_path, monkeypatch, no_poetry_cli):
 
 def test_missing_conda_env_is_reported(repo, tmp_path, monkeypatch, no_poetry_cli):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))  # Path.home() on Windows
     monkeypatch.delenv("CONDA_ENVS_PATH", raising=False)
     monkeypatch.delenv("MAMBA_ROOT_PREFIX", raising=False)
     _python_project(repo, extra={"environment.yml": "name: nowhere-env-xyz\n"})
@@ -156,6 +162,7 @@ def test_hatch_env_via_cli(repo, tmp_path, monkeypatch, no_poetry_cli):
 def test_pyenv_version_file(repo, tmp_path, monkeypatch, no_poetry_cli):
     monkeypatch.setenv("PYENV_ROOT", str(tmp_path / "pyenv"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))  # Path.home() on Windows
     interpreter = make_python(tmp_path / "pyenv" / "versions" / "3.12.4" / "bin" / "python")
     _python_project(repo, extra={".python-version": "3.11.9 3.12.4\n"})  # first missing, second installed
     assert pyenvs.find_python(repo.root) == (str(interpreter), "pyenv 3.12.4")
@@ -164,5 +171,6 @@ def test_pyenv_version_file(repo, tmp_path, monkeypatch, no_poetry_cli):
 def test_pyenv_version_missing_is_reported(repo, tmp_path, monkeypatch, no_poetry_cli):
     monkeypatch.setenv("PYENV_ROOT", str(tmp_path / "pyenv"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))  # Path.home() on Windows
     _python_project(repo, extra={".python-version": "3.99.0\n"})
     assert ".python-version present but that pyenv version is not installed" in pyenvs.find_python(repo.root)[1]
