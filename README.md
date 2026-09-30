@@ -52,6 +52,7 @@ Add or run tests covering shop/pricing.py. Then call verify_task again.
 2. **Double-click it.** Claude Desktop opens an install dialog. Click **Install**.
    If macOS or Claude warns that the extension is from an unverified developer, that's expected for
    extensions shared outside Anthropic's directory.
+   The same file works on Windows and Linux.
 3. **Talk to Claude** in a new chat. You don't need to know any paths:
    - *"Check my task-handoff setup."* confirms everything is ready and says exactly what to fix if not.
    - *"Find my shop project and start a task-handoff baseline for 'add dark mode'."*
@@ -69,8 +70,10 @@ access that folder. Allow it if your projects live there.
 
 ## Requirements
 
-- macOS or Linux
-- `git` and **Python 3.9+** available as `python3` (macOS: included with the Xcode Command Line Tools)
+- macOS, Linux or Windows
+- `git` and **Python 3.9+** on PATH (`python3`; on Windows `python`). On macOS both come with the
+  Xcode Command Line Tools; on Windows install [Git for Windows](https://git-scm.com) and Python from
+  python.org (tick *Add python.exe to PATH*).
 - Nothing else. The server has **no third-party dependencies**.
 
 > **Why a desktop extension and not a remote "custom connector"?** Custom connectors
@@ -196,6 +199,8 @@ new ones:
     plainly if the failure isn't from its change.
   - **Otherwise:** you see a one-line verdict.
   - **Skipped:** turns that changed nothing, or only docs.
+  - Each Claude Code session keeps its own baseline, so two sessions in the same repo don't
+    claim each other's work. Old session baselines are pruned automatically.
 
 Add this to `~/.claude/settings.json` (merge into any existing `hooks`). The path should point at
 your clone, and `run_cli.py` needs no install:
@@ -250,11 +255,11 @@ Only checks relevant to the changed files run. The full test suite is never run 
 
 | Changed | Checks |
 |---|---|
-| Python (interpreter: in-repo venv → Poetry env → conda env → `python3`) | read-only syntax parse; pytest on tests matched by name (`foo.py` to `test_foo.py`). Full suite only if dependencies or `conftest.py` changed, or nothing matched (labelled as a fallback). ruff and mypy if configured. |
+| Python (interpreter: in-repo venv → Poetry → pdm → hatch → conda/mamba env → pyenv `.python-version` → `python3`) | read-only syntax parse; pytest on tests matched by name (`foo.py` to `test_foo.py`). Full suite only if dependencies or `conftest.py` changed, or nothing matched (labelled as a fallback). ruff and mypy if configured. |
 | JS/TS (nearest `package.json`) | `typecheck` script or `tsc --noEmit`, `lint`, `vitest related` / `jest --findRelatedTests` when possible, else `test`; `build` only when dependencies or config changed |
 | Go | `go vet` and `go test` on the changed packages |
 | Shell scripts | `bash -n` (parse only), plus `shellcheck` if installed |
-| UI files, when the repo already has `playwright.config.*` | `playwright test` on the specs whose names match changed components |
+| UI files or Playwright specs, when the repo already has `playwright.config.*` | `playwright test` on the changed specs and the specs whose names match changed components (specs are never handed to vitest/jest; a unit runner that finds no tests is NOT TESTED, not a pass) |
 
 It also flags risky changes: auth code, schema or migrations, dependencies, CI and build config,
 deleted files, credential-like files, possible secrets in added lines (reported by file and pattern
@@ -290,7 +295,7 @@ Put a `.task-handoff.json` in the repository root:
 
 | Symptom | Fix |
 |---|---|
-| `pytest is not installed for … (python3 on PATH)` (BLOCKED) | The tool looks for the project's interpreter in this order: an in-repo `.venv/`/`venv/`; the **Poetry** env (via `poetry env info`, or Poetry's cache dir if `poetry` isn't on PATH; honours `POETRY_VIRTUALENVS_PATH`/`POETRY_CACHE_DIR`); the **conda** env named in `environment.yml` (via `prefix:`, `~/.conda/environments.txt`, or the usual miniconda/anaconda/miniforge/mambaforge/micromamba `envs/` dirs); then `python3` on PATH. The check's `why` shows which one was used. Create the env (e.g. `poetry install`, `conda env create`) with your test dependencies. pyenv/hatch/pdm envs outside the repo are not detected. |
+| `pytest is not installed for … (python3 on PATH)` (BLOCKED) | The tool looks for the project's interpreter in this order: an in-repo `.venv/`/`venv/`; the **Poetry** env (via `poetry env info`, or Poetry's cache dir if `poetry` isn't on PATH; honours `POETRY_VIRTUALENVS_PATH`/`POETRY_CACHE_DIR`); the **conda** env named in `environment.yml` (via `prefix:`, `~/.conda/environments.txt`, or the usual miniconda/anaconda/miniforge/mambaforge/micromamba `envs/` dirs); the **pdm** interpreter in `.pdm-python`; the **hatch** env (via `hatch env find`); the **conda/mamba** env named in `environment.yml` (via `prefix:`, `~/.conda/environments.txt`, `MAMBA_ROOT_PREFIX`, or the usual miniconda/anaconda/miniforge/mambaforge/micromamba `envs/` dirs); the **pyenv** version in `.python-version`; then `python3` on PATH. The check's `why` shows which one was used. Create the env (e.g. `poetry install`, `conda env create`) with your test dependencies. |
 | `dependencies not installed (no node_modules …)` | Run `npm install` (or pnpm/yarn) yourself. The tool never installs. |
 | `timed out after 120s` | Raise `verification.timeout_seconds` in `.task-handoff.json` |
 | `npm is not installed` in Claude Desktop but it works in a terminal | GUI apps get a minimal PATH. The server adds `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, `~/.cargo/bin`, `~/go/bin`, `~/.bun/bin` and `~/.volta/bin`; tools installed elsewhere (e.g. via nvm) may not be found. |
