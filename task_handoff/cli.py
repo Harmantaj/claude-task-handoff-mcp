@@ -3,6 +3,7 @@
   task-handoff start  <repo> "<task>"
   task-handoff inspect <repo> [--json]
   task-handoff verify  <repo> [--claim TEXT ...] [--json]
+  task-handoff pane    <repo> [--session ID]   (read-only JSON for the Claude Code pane mod)
   task-handoff hook session-start|stop   (Claude Code hooks; payload JSON on stdin)
 Exit status of `verify`: 0 VERIFIED/NO CHANGES/NO EXECUTABLE CHANGES, 1 FAILED, 2 otherwise.
 """
@@ -24,6 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     i = sub.add_parser("inspect"); i.add_argument("repo"); i.add_argument("--json", action="store_true")
     v = sub.add_parser("verify"); v.add_argument("repo"); v.add_argument("--claim", action="append", default=[])
     v.add_argument("--json", action="store_true")
+    p = sub.add_parser("pane"); p.add_argument("repo"); p.add_argument("--session", default="")
     h = sub.add_parser("hook"); h.add_argument("event", choices=["session-start", "stop"])
     args = parser.parse_args(argv)
     for stream in (sys.stdin, sys.stdout, sys.stderr):  # hook payloads and reports are UTF-8 on every OS
@@ -39,6 +41,11 @@ def main(argv: list[str] | None = None) -> int:
         return code
 
     try:
+        if args.cmd == "pane":
+            from .pane import pane_data
+
+            print(json.dumps(pane_data(args.repo, args.session or None)))
+            return 0
         if args.cmd == "start":
             b = gitstate.record_baseline(gitstate.repo_root(args.repo), args.task)
             print(f"Baseline recorded ({len(b['dirty'])} pre-existing uncommitted files).")

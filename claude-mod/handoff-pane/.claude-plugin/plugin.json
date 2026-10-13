@@ -1,0 +1,17 @@
+{
+  "name": "handoff-pane",
+  "version": "0.1.0",
+  "description": "Live pane: what this project is, what happened in this session, and the Task Handoff Verifier's diff and verdict.",
+  "author": {
+    "name": "Harmantaj"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "cli": {
+      "type": "string",
+      "title": "task-handoff command",
+      "description": "Path to the task-handoff executable. Empty: taken from your Stop hook in settings, else `task-handoff` on PATH.",
+      "default": ""
+    }
+  }
+}

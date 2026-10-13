@@ -229,6 +229,39 @@ To switch it off:
 Claude Desktop chats have no hooks. There, Claude follows the extension's instructions when you
 ask it to verify.
 
+### Live Handoff pane in Claude Code
+
+`claude-mod/handoff-pane/` is a Claude Code mod that opens a **Handoff** pane beside every session
+(the Code tab of the Claude desktop app, or a fullscreen terminal). It is short by default:
+
+- **What this project is:** two plain-English sentences written from the README and CLAUDE.md,
+  cached until those files change.
+- **This session so far:** goal, decisions, what changed and the current status. It is regenerated
+  after each finished turn by a fork of the session's own conversation.
+- **Changes and verification:** the last saved verdict and its checks, the files changed since the
+  session's baseline, and an **Out of date** warning when the code changed after the last check.
+  The pane never re-runs checks. It reads them through the read-only `task-handoff pane <repo>`
+  command and picks up new `verify_task` or Stop-hook results within a few seconds.
+
+**More detail** expands every section into a full explanation:
+
+- the project's parts and how it is tested
+- the session's history, decisions and reasons, and the open questions
+- every check, with its evidence labels, risks and suggested next step
+- the code diff
+
+The mod needs the automatic-mode hooks above, because it finds the `task-handoff` command through
+your Stop hook. It also needs function hooks, enabled with `"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1"`
+under `env` in `~/.claude/settings.json`. To load it in every session, add the folder there too:
+
+```json
+{ "env": { "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1",
+           "CLAUDE_CODE_PLUGIN_DIRS": "~/.local/share/claude-task-handoff-mcp/claude-mod/handoff-pane" } }
+```
+
+Type `/handoff` to reopen the pane after closing it. The session summary is one extra model request
+per turn, mostly served from the prompt cache. The project summary uses Haiku once per README change.
+
 ### Tools
 
 | Tool | Runs checks? | What it does |
