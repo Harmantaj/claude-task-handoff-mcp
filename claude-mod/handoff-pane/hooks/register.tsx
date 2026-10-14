@@ -279,7 +279,8 @@ export const register: Register = (on, options) => {
             label={expanded ? 'Less detail' : 'More detail'}
             onPress={() => toggleDetail($)}
           />
-          <Button key="refresh" label="Refresh" onPress={() => refreshAll($)} />
+          {/* The refresh takes model calls (tens of seconds): start it on a timer so the press answers at once. */}
+          <Button key="refresh" label="Refresh" onPress={() => void $.clock.after(0, () => void refreshAll($))} />
         </Box>
         {heading('What this project is', p.status)}
         <Markdown key="project" text={summaryText(p, 'Reading the README...')} />

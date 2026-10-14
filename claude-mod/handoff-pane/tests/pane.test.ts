@@ -126,3 +126,21 @@ test('a failing task-handoff command is shown as an error, never as a pass', asy
   expect(verify).toContain('No verification data: error: Not inside a git repository')
   expect(verify).not.toContain('Verdict')
 })
+
+test('Refresh answers the press at once and refreshes afterwards', async ($, on) => {
+  const calls: string[][] = []
+  const clock = mock.clock(on)
+  engine(on, calls)
+
+  await $.session.start({ cwd: '/repo' } as never)
+  await clock.advance(100)
+  const before = calls.length
+
+  const ui = await $.ui.mount({ plugin: 'handoff-pane', surface: 'desktop', component: 'Pane', requestId: 'handoff', props: PANE_PROPS })
+  await ui.press({ key: 'refresh' })
+  expect(calls.length).toBe(before)
+
+  await clock.advance(10)
+  expect(calls.slice(before).some(argv => argv.includes('pane'))).toBe(true)
+  await ui.unmount()
+})
